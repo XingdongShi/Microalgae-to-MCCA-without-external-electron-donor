@@ -25,8 +25,8 @@ import biosteam as bst
 import numpy as np
 import thermosteam as tmo
 from biosteam import Stream, SystemFactory
-from biosteam.units import MixTank, Pump, StorageTank, HXutility, Mixer, Splitter, MultiStageMixerSettlers
-from biosteam.facilities import AirDistributionPackage, ProcessWaterCenter, CoolingTower, ChilledWaterPackage
+from biosteam.units import Pump, StorageTank, HXutility, Mixer, Splitter, MultiStageMixerSettlers
+from biosteam.facilities import AirDistributionPackage, ProcessWaterCenter, CoolingTower, ChilledWaterPackage, HeatExchangerNetwork
 from biosteam import main_flowsheet
 from .units import (
     FeedstockPreprocessing, AcidPretreatmentReactor, Saccharification, SolidLiquidSeparation, MCCAFermentation, 
@@ -34,13 +34,13 @@ from .units import (
     NeutralizationTank, AnaerobicDigestion
 )
 from .utils import price
-from .facilities import BT, HXNWithMin
 from ._chemicals import chems
 from .tea import create_tea
 from .streams import microalgae_feed
 import warnings
-import re
-warnings.filterwarnings("ignore", message=r".*Hot utility load is negative.*", category=RuntimeWarning, module=r"biosteam\.facilities")
+# Filter out specific warnings
+warnings.filterwarnings("ignore", message="phase equilibrium solution results in negative flow rates")
+warnings.filterwarnings("ignore", message=".*has no defined Dortmund groups.*")
 warnings.filterwarnings("ignore", message=".*has been replaced in registry")
 warnings.filterwarnings("ignore", category=bst.exceptions.CostWarning)
 warnings.filterwarnings("ignore", message=".*moisture.*is smaller than the desired.*")
@@ -49,23 +49,12 @@ warnings.filterwarnings("ignore", message=".*moisture of influent.*is smaller th
 # ------------------------------------------------------------------
 # Utility: labor cost scaling with plant size
 # ------------------------------------------------------------------
-
 def compute_labor_cost(dry_tpd: float,
                         base_tpd: float = 2205.0,
                         base_cost: float = 3212962.0,
                         exponent: float = 0.2,
                         floor_tpd: float = 100.0,
                         floor_cost: float = 0.5e6) -> float:
-    """Scale labor cost with plant size but keep a fixed cost below *floor_tpd*.
-    Parameters
-    ----------
-    dry_tpd
-        Dry feed rate (t/d).
-    base_tpd, base_cost, exponent
-        Parameters of the power-law model.
-    floor_tpd, floor_cost
-        If dry_tpd < floor_tpd, return floor_cost (representing baseline staffing).
-    """
     if dry_tpd < floor_tpd:
         return floor_cost
     return base_cost * (dry_tpd / base_tpd) ** exponent
@@ -92,7 +81,7 @@ bst.System.strict_convergence = False # True => throw exception if system does n
           dict(ID='caproic_acid_product', thermo=chems), 
           dict(ID='heptanoic_acid_product', thermo=chems), 
           dict(ID='caprylic_acid_product', thermo=chems)]
-)
+    )
 def create_microalgae_MCCA_production_sys(ins, outs):
     # Set the thermodynamic package explicitly
     tmo.settings.set_thermo(chems)
@@ -103,8 +92,7 @@ def create_microalgae_MCCA_production_sys(ins, outs):
         butyric_acid_product,
         caproic_acid_product,
         heptanoic_acid_product,
-        caprylic_acid_product,
-    ) = outs
+        caprylic_acid_product) = outs
     
     # Calculate all required stream properties based on feed
     microalgae_mass = microalgae_feed.F_mass
@@ -127,8 +115,8 @@ def create_microalgae_MCCA_production_sys(ins, outs):
     nh4oh_mass = nh4oh_mol * 35 / 1000 # mol mass to mass
     ammonium_hydroxide = Stream('ammonium_hydroxide', NH4OH=nh4oh_mass, units='kg/hr', price=price['AmmoniumHydroxide'])
     # Enzyme dosages
-    glucoamylase_mass = float(microalgae_mass * 0.0011)  # 确保为标量
-    alpha_amylase_mass = float(microalgae_mass * 0.0082)  # 确保为标量，ref from cron project
+    glucoamylase_mass = float(microalgae_mass * 0.0011)  # ref from cron project
+    alpha_amylase_mass = float(microalgae_mass * 0.0082)  # ref from cron project
     glucoamylase = Stream('glucoamylase', GlucoAmylase=glucoamylase_mass, units='kg/hr', price=price['GlucoAmylase'])
     alpha_amylase = Stream('alpha_amylase', AlphaAmylase=alpha_amylase_mass, units='kg/hr', price=price['AlphaAmylase'])
     
@@ -143,10 +131,10 @@ def create_microalgae_MCCA_production_sys(ins, outs):
     # Yeast addition in MCCA fermentation
     yeast_mass = microalgae_mass * 5 / 75
     yeast = Stream('yeast', Yeast=yeast_mass, units='kg/hr', price=price['Yeast'])
-    # Octanol for extraction
-    fresh_octanol = Stream('fresh_octanol', Octanol=200, units='kg/hr', price=price['Octanol'])
-    octanol_recycle = Stream('octanol_recycle', Octanol=50, units='kg/hr')
-    octanol_feed = bst.Stream()
+    # OleylAlcohol for extraction
+    fresh_oleylalcohol = Stream('fresh_oleylalcohol', OleylAlcohol=200, units='kg/hr', price=price['OleylAlcohol'])
+    oleylalcohol_recycle = Stream('oleylalcohol_recycle', OleylAlcohol=50, units='kg/hr')
+    oleylalcohol_feed = bst.Stream()
     # Assign prices to product streams
     #butanol_product.price = price['Butanol']
     butyric_acid_product.price = price['ButyricAcid']
@@ -194,67 +182,91 @@ def create_microalgae_MCCA_production_sys(ins, outs):
     H301 = HXutility('H301', P208-0, T=37+273.15)
     T301 = StorageTank('T301', yeast)
     P301 = Pump('P301', T301-0)
-    R301 = MCCAFermentation('R301', [H301-0, P301-0], microalgae_mass_flow=microalgae_mass, titer=2.003)
-    
+    R301 = MCCAFermentation('R301', [H301-0, P301-0], microalgae_mass_flow=microalgae_mass, titer = 2.003)
+
     # Add C6 yield factor specification
-    @R301.add_specification(run=False)
+    @R301.add_specification(run=True)
     def set_C6_yield_factor(factor=1.0):
         R301.caproic_acid_yield_factor = factor
     
     # Add C6 titer specification  
-    @R301.add_specification(run=False)
+    @R301.add_specification(run=True)
     def set_C6_titer(titer=2.003):
         R301.titer = titer
     
-    T302 = MixTank('T302', [R301-1])
+    # Bind specification functions as methods for parameter loading
+    R301.set_C6_yield_factor = lambda x: setattr(R301, 'caproic_acid_yield_factor', x)
+    R301.set_C6_titer = lambda x: setattr(R301, 'titer', x)
+
+    T302 = Mixer('T302', [R301-1])
     S301 = SolidLiquidSeparation('S301', R301-0)
 
     # =====================
     # Area 4: Product extraction
     # =====================
-    M401 = Mixer('M401', [fresh_octanol, octanol_recycle], octanol_feed)
+    M401 = Mixer('M401', [fresh_oleylalcohol, oleylalcohol_recycle], oleylalcohol_feed)
     @M401.add_specification(run=True)
-    def adjust_fresh_octanol():
-        total_octanol = 200  
-        recycle = octanol_recycle.imass['Octanol']
-        fresh = max(total_octanol - recycle, 1e-3)
-        fresh_octanol.imass['Octanol'] = fresh
-    IDs = ['Water', 'AceticAcid', 'PropionicAcid', 'ButyricAcid', 'ValericAcid', 'CaproicAcid','CaprylicAcid', 'HeptanoicAcid', 'Butanol', 'Octanol']
+    def adjust_fresh_oleylalcohol():
+        total_oleylalcohol = 200  
+        recycle = oleylalcohol_recycle.imass['OleylAlcohol']
+        fresh = max(total_oleylalcohol - recycle, 1e-3)
+        fresh_oleylalcohol.imass['OleylAlcohol'] = fresh
+    IDs = ['Water', 'AceticAcid', 'PropionicAcid', 'ButyricAcid', 'ValericAcid', 'CaproicAcid','CaprylicAcid', 'HeptanoicAcid', 'Butanol', 'OleylAlcohol']
     K = np.array([1/5000, 0.24, 1.29, 5000/1, 13.58, 5000/1, 5000/1, 5000/1, 5000/1, 100000/1])
     S402 = MultiStageMixerSettlers(
         'S402',
         partition_data={'K': K, 'IDs': IDs},
         N_stages=5,
-        ins=[S301-0, M401-0],
-        outs=['extracted_organic', 'aqueous_raffinate']
+        ins=[S301-0, M401-0]
     )
-    
+
     # Add extraction efficiency specification
     original_K = K.copy()
-    @S402.add_specification(run=False)
+    @S402.add_specification(run=True)
     def set_extraction_efficiency(efficiency=1.0):
         S402.partition_data['K'] = original_K * efficiency
+    
+    # Bind as method for parameter loading
+    S402.set_extraction_efficiency = lambda x: setattr(S402, 'partition_data', {'K': original_K * x, 'IDs': IDs})
+
     #D401 = ButanolDistillation('D401', S402-0)
     #D401.check_LHK = False
-    D402 = ButyricAcidDistillation('D402', S402-0)
-    D402.check_LHK = False
-    D403 = CaproicAcidDistillation('D403', D402-1)
-    D403.check_LHK = False
-    D404 = HeptanoicAcidDistillation('D404', D403-1)
-    D404.check_LHK = False
-    D405 = CaprylicAcidDistillation('D405', D404-1, ['', octanol_recycle])
-    D405.check_LHK = False
-    
+    D402 = bst.BinaryDistillation('D402', S402-0, LHK=('ButyricAcid', 'CaproicAcid'),
+            Lr=0.99, Hr=0.99, k=1.2,
+            partial_condenser=False,
+            is_divided=True)
+    #D402.check_LHK = False
+    D403 = bst.BinaryDistillation('D403', D402-1, LHK=('CaproicAcid', 'HeptanoicAcid'),
+            Lr=0.99, Hr=0.99, k=1.2,
+            partial_condenser=False,
+            is_divided=True
+        )
+    #D403.check_LHK = False
+    D404 = bst.BinaryDistillation('D404', D403-1, LHK=('HeptanoicAcid', 'CaprylicAcid'),
+            Lr=0.99, Hr=0.99, k=1.2,
+            partial_condenser=False,
+            is_divided=True)
+    #D404.check_LHK = False
+    D405 = bst.BinaryDistillation('D405', D404-1, ['', oleylalcohol_recycle], LHK=('CaprylicAcid', 'OleylAlcohol'),
+            Lr=0.99, Hr=0.99, k=1.2,
+            partial_condenser=False,
+            is_divided=True,
+            product_specification_format='Recovery')
+    #D405.check_LHK = False
+
     # Add distillation efficiency specification
     distillation_units = [D402, D403, D404, D405]
-    @D403.add_specification(run=False)  # Use D403 as the representative unit
+    @D403.add_specification(run=True)  # Use D403 as the representative unit
     def set_distillation_efficiency(efficiency=1.0):
         for unit in distillation_units:
             unit.Lr = 0.99 * efficiency
             unit.Hr = 0.99 * efficiency
     
-    # Add acid loading factor specification to a suitable unit
-    @R201.add_specification(run=False)  # Add to acid pretreatment reactor
+    # Bind as method for parameter loading
+    D403.set_distillation_efficiency = lambda x: [setattr(unit, 'Lr', 0.99 * x) or setattr(unit, 'Hr', 0.99 * x) for unit in distillation_units]
+    
+    #Add acid loading factor specification to a suitable unit
+    @R201.add_specification(run=True)  # Add to acid pretreatment reactor
     def set_acid_loading_factor(factor=1.0):
         pure_H2SO4_new = microalgae_mass * acid_loading * factor
         acid_solution_mass_new = pure_H2SO4_new / acid_purity
@@ -262,11 +274,26 @@ def create_microalgae_MCCA_production_sys(ins, outs):
         _sulfuric_acid_stream.imass['H2SO4'] = pure_H2SO4_new
         _sulfuric_acid_stream.imass['Water'] = water_mass_acid_new
     
+    # Bind as method for parameter loading
+    def _set_acid_loading_factor(factor):
+        pure_H2SO4_new = microalgae_mass * acid_loading * factor
+        acid_solution_mass_new = pure_H2SO4_new / acid_purity
+        water_mass_acid_new = acid_solution_mass_new * (1 - acid_purity)
+        _sulfuric_acid_stream.imass['H2SO4'] = pure_H2SO4_new
+        _sulfuric_acid_stream.imass['Water'] = water_mass_acid_new
+    R201.set_acid_loading_factor = _set_acid_loading_factor
+    
     # Add enzyme loading factor specification to a suitable unit
-    @R203.add_specification(run=False)  # Add to first saccharification reactor
+    @R203.add_specification(run=True)  # Add to first saccharification reactor
     def set_enzyme_loading_factor(factor=1.0):
         _glucoamylase_stream.imass['GlucoAmylase'] = microalgae_mass * 0.0011 * factor
         _alpha_amylase_stream.imass['AlphaAmylase'] = microalgae_mass * 0.0082 * factor
+    
+    # Bind as method for parameter loading
+    def _set_enzyme_loading_factor(factor):
+        _glucoamylase_stream.imass['GlucoAmylase'] = microalgae_mass * 0.0011 * factor
+        _alpha_amylase_stream.imass['AlphaAmylase'] = microalgae_mass * 0.0082 * factor
+    R203.set_enzyme_loading_factor = _set_enzyme_loading_factor
 
     # =====================
     # Area 5: Waste reuse for biogas production
@@ -290,18 +317,18 @@ def create_microalgae_MCCA_production_sys(ins, outs):
     T605 = StorageTank('T605', D405-0, tau=60.*24., V_wf=0.9, vessel_type='Floating roof', vessel_material='Stainless steel')
     P605 = Pump('P605', T605-0, caprylic_acid_product)
     CT = CoolingTower('CT')
-    HXN601 = HXNWithMin('HXN601', T_min_app=10, min_heat_util=2e6) 
+    HXN601 = HeatExchangerNetwork('HXN601', 
+                                  #T_min_app=10, 
+                                  #min_heat_util=2e6
+                                  ) 
     PWC = ProcessWaterCenter('PWC')
     ADP = AirDistributionPackage('ADP')
     CWP = ChilledWaterPackage('CWP')
-    
-    # 添加锅炉涡轮发电机
-    # 使用厌氧消化产生的沼气作为燃料，并允许购买额外天然气
     BT601 = bst.facilities.BoilerTurbogenerator('BT601', 
                                                 ins=(R501-2, M502-0, '', '', '', ''),
-                                                satisfy_system_electricity_demand=True,  # 允许购买天然气
-                                                boiler_efficiency=0.9,  # 提高锅炉效率
-                                                turbogenerator_efficiency=0.85)  # 提高涡轮发电机效率
+                                                satisfy_system_electricity_demand=True,  
+                                                boiler_efficiency=0.9,  
+                                                turbogenerator_efficiency=0.85) 
     
     WastewaterT = bst.create_high_rate_wastewater_treatment_system('WastewaterT',
         M503-0,  # Use diluted wastewater stream
@@ -328,15 +355,14 @@ microalgae_tea = create_tea(system=microalgae_mcca_sys, IRR=0.10, duration=(2024
     startup_months=3, startup_FOCfrac=1, startup_salesfrac=0.5,
     startup_VOCfrac=0.75, WC_over_FCI=0.05,
     finance_interest=0.08, finance_years=10, finance_fraction=0.4,
-        OSBL_units=(u.CT, u.CWP, u.ADP, u.PWC),
+        OSBL_units=(u.CT, u.CWP, u.ADP, u.PWC, u.BT601),
     warehouse=0.04, site_development=0.09, additional_piping=0.045,
     proratable_costs=0.10, field_expenses=0.10, construction=0.20,
     contingency=0.10, other_indirect_costs=0.10, 
     labor_cost=max(0.5e6, compute_labor_cost(dry_tpd)),
-        labor_burden=0.90, property_insurance=0.007, maintenance=0.03, boiler_turbogenerator=None,
+        labor_burden=0.90, property_insurance=0.007, maintenance=0.03, boiler_turbogenerator=u.BT601,
     steam_power_depreciation='MACRS20')
 
-# Main script: run additional analysis and print results
 if __name__ == '__main__':
     microalgae_mcca_sys.diagram('cluster', format='png')
     microalgae_mcca_sys.print()
@@ -367,8 +393,6 @@ if __name__ == '__main__':
     print("CAPEX Table:\n", microalgae_tea.CAPEX_table())
     print("FOC Table:\n", microalgae_tea.FOC_table())
     print("Cashflow Table:\n", microalgae_tea.get_cashflow_table())
-
-
     
     # Quick check: product flows in each units
     # print("\n===== Stream Mass Flows for Each Unit (kg/hr) =====")
@@ -392,6 +416,3 @@ if __name__ == '__main__':
     #           s.caproic_acid_product,s.heptanoic_acid_product, s.caprylic_acid_product, s.butyric_acid_product):
     #    print(f"{p.ID}: {p.F_mass:.2f} kg/h @ {p.price} $/kg")
 
-# ==========================================
-# Sensitive analysis
-# ==========================================
