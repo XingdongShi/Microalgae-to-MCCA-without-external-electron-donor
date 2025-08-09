@@ -75,6 +75,9 @@ price = {
     'Lime': 0.1189 * _lb_per_kg
 }
 
+# Set electricity price for TEA consistency with succinic baseline (2016$)
+bst.PowerUtility.price = 0.070
+
 # Chemical Engineering Plant Cost Index from Chemical Engineering Magzine
 # (https://www.chemengonline.com/the-magazine/)
 CEPCI = {1997: 386.5,
