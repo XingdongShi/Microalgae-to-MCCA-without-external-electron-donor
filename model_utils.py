@@ -85,7 +85,7 @@ def create_unit_groups():
         unit_groups.append(bst.UnitGroup('Pretreatment and hydrolysis', units=pretreatment_units))
     
     # Area 3: Conversion
-    conversion_units = [units_dict[uid] for uid in ['H301', 'T301', 'P301', 'R301', 'T302', 'S301'] if uid in units_dict]
+    conversion_units = [units_dict[uid] for uid in ['H301', 'M301', 'T301', 'P301', 'R301', 'T302', 'S301'] if uid in units_dict]
     if conversion_units:
         unit_groups.append(bst.UnitGroup('Conversion', units=conversion_units))
     

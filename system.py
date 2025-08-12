@@ -30,7 +30,6 @@ from biosteam.facilities import AirDistributionPackage, ProcessWaterCenter, Cool
 from biosteam import main_flowsheet
 from .units import (
     FeedstockPreprocessing, AcidPretreatmentReactor, Saccharification, SolidLiquidSeparation, MCCAFermentation, 
-    ButanolDistillation, ButyricAcidDistillation, CaproicAcidDistillation, HeptanoicAcidDistillation, CaprylicAcidDistillation, 
     NeutralizationTank, AnaerobicDigestion
 )
 from .utils import price
@@ -130,7 +129,9 @@ def create_microalgae_MCCA_production_sys(ins, outs):
     naoh = Stream('naoh', NaOH=total_naoh_mass, units='kg/hr', price=price['NaOH'])
     # Yeast addition in MCCA fermentation
     yeast_mass = microalgae_mass * 5 / 75
-    yeast = Stream('yeast', Yeast=yeast_mass, units='kg/hr', price=price['Yeast'])
+    fresh_yeast = Stream('fresh_yeast', Yeast=yeast_mass, units='kg/hr', price=price['Yeast'])
+    yeast_recycle = Stream('yeast_recycle', Yeast=0, units='kg/hr')
+    yeast_feed = bst.Stream() 
     # OleylAlcohol for extraction
     fresh_oleylalcohol = Stream('fresh_oleylalcohol', OleylAlcohol=200, units='kg/hr', price=price['OleylAlcohol'])
     oleylalcohol_recycle = Stream('oleylalcohol_recycle', OleylAlcohol=50, units='kg/hr')
@@ -180,9 +181,19 @@ def create_microalgae_MCCA_production_sys(ins, outs):
     # Area 3: Fermentation for MCCA production
     # =====================
     H301 = HXutility('H301', P208-0, T=37+273.15)
-    T301 = StorageTank('T301', yeast)
+    
+    # Yeast mixing for fresh and recycle
+    M301 = Mixer('M301', [fresh_yeast, yeast_recycle], yeast_feed)
+    @M301.add_specification(run=True)
+    def adjust_fresh_yeast():
+        total_yeast_needed = yeast_mass  
+        recycle = yeast_recycle.imass['Yeast']
+        fresh = max(total_yeast_needed - recycle, total_yeast_needed * 0.05)  # 5% fresh yeast supply
+        fresh_yeast.imass['Yeast'] = fresh
+    
+    T301 = StorageTank('T301', yeast_feed)
     P301 = Pump('P301', T301-0)
-    R301 = MCCAFermentation('R301', [H301-0, P301-0], microalgae_mass_flow=microalgae_mass, titer = 2.003)
+    R301 = MCCAFermentation('R301', [H301-0, P301-0], ['', '', '', yeast_recycle], microalgae_mass_flow=microalgae_mass, titer = 2.003)
 
     # Add C6 yield factor specification
     @R301.add_specification(run=True)
@@ -335,6 +346,7 @@ def create_microalgae_MCCA_production_sys(ins, outs):
         skip_IC=True,  # Skip internal circulation to avoid division by zero
         process_ID='6'  # Use process ID 6 for unit numbering
     )
+
 
 # ==========================================
 # TEA Analysis

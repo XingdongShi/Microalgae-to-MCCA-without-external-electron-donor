@@ -61,7 +61,6 @@ price = {
     'HeptanoicAcid': 3.17, # $/kg https://www.expertmarketresearch.com/prefeasibility-reports/heptanoic-acid-manufacturing-plant-project-report
     'CaprylicAcid': 5.07,  # $/kg Increasing the economic value of lignocellulosic stillage through medium-chain fatty acid production
     'SulfuricAcid': 0.11, # $/kg https://catcost.chemcatbio.org/materials-library
-    'Lime': 0.12, # https://catcost.chemcatbio.org/materials-library
     'AmmoniumHydroxide': 0.204, # BDO, succinic, HP program
     'NaOH': 1.01, #https://catcost.chemcatbio.org/materials-library
     # Baseline from Davis et al., 2018, lower bound is 2015-2019 average of 	
@@ -75,6 +74,9 @@ price = {
     # Upper bound is +10% from baseline = 0.1189 * _lb_per_kg * 1.1 = 0.288
     'Lime': 0.1189 * _lb_per_kg
 }
+
+# Set electricity price for TEA consistency with succinic baseline (2016$)
+bst.PowerUtility.price = 0.070
 
 # Chemical Engineering Plant Cost Index from Chemical Engineering Magzine
 # (https://www.chemengonline.com/the-magazine/)
