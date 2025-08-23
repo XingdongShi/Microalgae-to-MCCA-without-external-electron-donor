@@ -1,16 +1,23 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-# Bioindustrial-Park: BioSTEAM's Premier Biorefinery Models and Results
-# Copyright (C) 2021-, Sarang Bhagwat <sarangb2@illinois.edu>
-#
-# This module is under the UIUC open-source license. See
-# github.com/BioSTEAMDevelopmentGroup/biosteam/blob/master/LICENSE.txt
-# for license details.
+Created on Sat August 23 13:00:00 2025
 
-Uncertainty analysis for microalgae biorefinery
+Microalgae biorefinery to produce medium chain fatty acids 
+by anaerobic fermentation without external electron donor addition- uncertainty analysis
 
-Based on succinic project but adapted for microalgae system structure
+References
+----------
+[1] BioSTEAM Documentation: 
+    https://biosteam.readthedocs.io/en/latest/API/evaluation/Model.html
+[2] Cortes-Peña et al., BioSTEAM: A Fast and Flexible Platform for the Design, 
+    Simulation, and Techno-Economic Analysis of Biorefineries under Uncertainty. 
+    ACS Sustainable Chem. Eng. 2020, 8 (8), 3302–3310.
+[3] succinic biorefineries project:
+    https://github.com/BioSTEAMDevelopmentGroup/Bioindustrial-Park/tree/master/biorefineries/succinic
+
+@author: Xingdong Shi
+@version: 0.0.1
 """
 
 from warnings import filterwarnings

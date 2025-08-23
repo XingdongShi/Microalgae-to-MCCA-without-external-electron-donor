@@ -1,10 +1,23 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Model utilities for microalgae biorefinery uncertainty analysis
+Created on Sat July 23 13:00:00 2025
 
-Based on succinic project's model_utils.py but adapted for microalgae system structure
+Microalgae biorefinery to produce medium chain fatty acids 
+by anaerobic fermentation without external electron donor addition- Model Utils
+
+References
+----------
+[1] BioSTEAM Documentation: 
+    https://biosteam.readthedocs.io/en/latest/API/evaluation/Model.html
+[2] Cortes-Peña et al., BioSTEAM: A Fast and Flexible Platform for the Design, 
+    Simulation, and Techno-Economic Analysis of Biorefineries under Uncertainty. 
+    ACS Sustainable Chem. Eng. 2020, 8 (8), 3302–3310.
+
+@author: Xingdong Shi
+@version: 0.0.1
 """
+
 from pandas import DataFrame, read_excel
 import chaospy as shape
 import numpy as np

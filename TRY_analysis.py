@@ -1,9 +1,22 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Titer, Rate, Yield (TRY) analysis for microalgae biorefinery
+Created on Sat August 23 17:00:00 2025
 
-Based on succinic project but adapted for microalgae system structure
+Microalgae biorefinery to produce medium chain fatty acids 
+by anaerobic fermentation without external electron donor addition- TRY analysis
+
+References
+----------
+[1] BioSTEAM Documentation: 
+[2] Cortes-Peña et al., BioSTEAM: A Fast and Flexible Platform for the Design, 
+    Simulation, and Techno-Economic Analysis of Biorefineries under Uncertainty. 
+    ACS Sustainable Chem. Eng. 2020, 8 (8), 3302–3310.
+[3] succinic biorefineries project:
+    https://github.com/BioSTEAMDevelopmentGroup/Bioindustrial-Park/tree/master/biorefineries/succinic
+
+@author: Xingdong Shi
+@version: 0.0.1
 """
 
 import numpy as np
