@@ -140,7 +140,7 @@ timer = TicToc('timer')
 timer.tic()
 
 # Set seed to make sure each time the same set of random numbers will be used
-np.random.seed(3221) # 3221
+np.random.seed(3221)
 
 for i in range(len(modes)):
     mode = modes[i]
@@ -169,43 +169,43 @@ for i in range(len(modes)):
     results_dict['Baseline']['FEC'][mode] = tot_FEC = lca.FEC
     
     # GWP breakdown analysis
-    try:
-        material_GWP_breakdown = lca.material_GWP_breakdown
+    # try:
+    #     material_GWP_breakdown = lca.material_GWP_breakdown
         
-        results_dict['Baseline']['GWP Breakdown'][mode] = {
-            'feedstock': lca.feedstock_GWP,
-            'material inputs': lca.material_GWP,
-            'natural gas\n(for steam generation)': getattr(lca, 'ng_GWP', 0),
-            'net electricity': lca.net_electricity_GWP,
-            'direct non-biogenic\nemissions': getattr(lca, 'direct_emissions_GWP', 0),
-        }
+    #     results_dict['Baseline']['GWP Breakdown'][mode] = {
+    #         'feedstock': lca.feedstock_GWP,
+    #         'material inputs': lca.material_GWP,
+    #         'natural gas\n(for steam generation)': getattr(lca, 'ng_GWP', 0),
+    #         'net electricity': lca.net_electricity_GWP,
+    #         'direct non-biogenic\nemissions': getattr(lca, 'direct_emissions_GWP', 0),
+    #     }
         
-        tot_positive_GWP = sum([v for v in results_dict['Baseline']['GWP Breakdown'][mode].values() if v>0])
-        if tot_positive_GWP > 0:
-            for k, v in results_dict['Baseline']['GWP Breakdown'][mode].items():
-                results_dict['Baseline']['GWP Breakdown'][mode][k] = v/tot_positive_GWP
-    except Exception as e:
-        print(f"Warning: Could not calculate GWP breakdown: {e}")
-        results_dict['Baseline']['GWP Breakdown'][mode] = {}
+    #     tot_positive_GWP = sum([v for v in results_dict['Baseline']['GWP Breakdown'][mode].values() if v>0])
+    #     if tot_positive_GWP > 0:
+    #         for k, v in results_dict['Baseline']['GWP Breakdown'][mode].items():
+    #             results_dict['Baseline']['GWP Breakdown'][mode][k] = v/tot_positive_GWP
+    # except Exception as e:
+    #     print(f"Warning: Could not calculate GWP breakdown: {e}")
+    #     results_dict['Baseline']['GWP Breakdown'][mode] = {}
     
-    # FEC breakdown analysis
-    try:
-        material_FEC_breakdown = lca.material_FEC_breakdown
+    # # FEC breakdown analysis
+    # try:
+    #     material_FEC_breakdown = lca.material_FEC_breakdown
         
-        results_dict['Baseline']['FEC Breakdown'][mode] = {
-            'feedstock': lca.feedstock_FEC,
-            'material inputs': lca.material_FEC,
-            'natural gas\n(for steam generation)': getattr(lca, 'ng_FEC', 0),
-            'net electricity': lca.net_electricity_FEC,
-        }
+    #     results_dict['Baseline']['FEC Breakdown'][mode] = {
+    #         'feedstock': lca.feedstock_FEC,
+    #         'material inputs': lca.material_FEC,
+    #         'natural gas\n(for steam generation)': getattr(lca, 'ng_FEC', 0),
+    #         'net electricity': lca.net_electricity_FEC,
+    #     }
         
-        tot_positive_FEC = sum([v for v in results_dict['Baseline']['FEC Breakdown'][mode].values() if v>0])
-        if tot_positive_FEC > 0:
-            for k, v in results_dict['Baseline']['FEC Breakdown'][mode].items():
-                results_dict['Baseline']['FEC Breakdown'][mode][k] = v/tot_positive_FEC
-    except Exception as e:
-        print(f"Warning: Could not calculate FEC breakdown: {e}")
-        results_dict['Baseline']['FEC Breakdown'][mode] = {}
+    #     tot_positive_FEC = sum([v for v in results_dict['Baseline']['FEC Breakdown'][mode].values() if v>0])
+    #     if tot_positive_FEC > 0:
+    #         for k, v in results_dict['Baseline']['FEC Breakdown'][mode].items():
+    #             results_dict['Baseline']['FEC Breakdown'][mode][k] = v/tot_positive_FEC
+    # except Exception as e:
+    #     print(f"Warning: Could not calculate FEC breakdown: {e}")
+    #     results_dict['Baseline']['FEC Breakdown'][mode] = {}
         
     print(f"\nSimulated baseline. MPSP = ${round(results_dict['Baseline']['MPSP'][mode],2)}/kg.")
     print('\n\nEvaluating ...')
