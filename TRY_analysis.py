@@ -19,115 +19,127 @@ References
 @version: 0.0.1
 """
 
+import os
+from datetime import datetime
 import numpy as np
 import pandas as pd
-import os
-from .uncertainties import create_model
+import biosteam as bst
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+from ._chemicals import chems
+from .system import create_microalgae_MCCA_production_sys
+from .tea import microalgae_tea
+from .lca import create_microalgae_lca
 
-def run_TRY_analysis():
-    """Run Titer, Rate, Yield analysis for microalgae system"""
-    print("Creating model for TRY analysis...")
-    model, namespace_dict = create_model()
-    
-    # Load parameter distributions  
-    current_dir = os.path.dirname(__file__)
-    param_file = os.path.join(current_dir, 'parameter_distributions.xlsx')
-    
-    if not os.path.exists(param_file):
-        raise FileNotFoundError(f"Parameter distributions file not found: {param_file}")
-    
-    print(f"Loading parameter distributions from {param_file}...")
-    model.load_parameter_distributions(param_file, namespace_dict)
-    
-    # Define TRY parameter ranges based on microalgae system
-    # These ranges should be adjusted based on your specific system
-    titer_range = np.linspace(1.0, 4.0, 11)  # g/L - caproic acid titer
-    yield_range = np.linspace(0.15, 0.35, 11)  # g/g - C6 yield
-    
-    results = []
-    
-    # Find TRY parameters from loaded parameters
-    titer_param = None
-    yield_param = None
-    
-    for param in model.parameters:
-        param_name_lower = param.name.lower()
-        if 'titer' in param_name_lower and 'c6' in param_name_lower:
-            titer_param = param
-            print(f"Found titer parameter: {param.name}")
-        elif 'yield' in param_name_lower and 'c6' in param_name_lower:
-            yield_param = param
-            print(f"Found yield parameter: {param.name}")
-    
-    if titer_param is None:
-        print("Warning: Could not find titer parameter. Available parameters:")
-        for param in model.parameters:
-            print(f"  - {param.name}")
-        # Use first parameter with 'titer' in name as fallback
-        for param in model.parameters:
-            if 'titer' in param.name.lower():
-                titer_param = param
-                print(f"Using fallback titer parameter: {param.name}")
-                break
-    
-    if yield_param is None:
-        print("Warning: Could not find yield parameter. Available parameters:")
-        for param in model.parameters:
-            print(f"  - {param.name}")
-        # Use first parameter with 'yield' in name as fallback
-        for param in model.parameters:
-            if 'yield' in param.name.lower():
-                yield_param = param
-                print(f"Using fallback yield parameter: {param.name}")
-                break
-    
-    if titer_param is None or yield_param is None:
-        print("Error: Could not find both titer and yield parameters")
-        return None
-    
-    # Run TRY analysis
-    print(f"\nRunning TRY analysis...")
-    print(f"Titer range: {min(titer_range):.2f} - {max(titer_range):.2f}")
-    print(f"Yield range: {min(yield_range):.3f} - {max(yield_range):.3f}")
-    
-    baseline_sample = model.get_baseline_sample()
-    total_combinations = len(titer_range) * len(yield_range)
-    completed = 0
-    
-    for i, titer in enumerate(titer_range):
-        for j, yield_val in enumerate(yield_range):
-            sample = baseline_sample.copy()
-            sample[titer_param.index] = titer
-            sample[yield_param.index] = yield_val
-            
+def run_TRY_analysis(steps: int = 30):
+
+
+    bst.settings.set_thermo(chems)
+    sys = create_microalgae_MCCA_production_sys()
+    sys.simulate()
+
+    u = sys.flowsheet.unit
+    s = sys.flowsheet.stream
+    R301 = next((unit for unit in sys.units if unit.ID == 'R301'), None)
+    if R301 is None:
+        raise RuntimeError('no R301。')
+
+    baseline_titer = float(getattr(R301, 'titer', 2.003))
+    baseline_yield_factor = float(getattr(R301, 'caproic_acid_yield_factor', 1.0))
+
+    titers = np.linspace(max(0.1, 0.5 * baseline_titer), 1.5 * baseline_titer, steps)
+    yields = np.linspace(0.5 * baseline_yield_factor, 1.5 * baseline_yield_factor, steps)
+
+    tea_obj = microalgae_tea(sys)
+    lca = create_microalgae_lca(sys, s.caproic_acid_product, ['CaproicAcid'], u.BT601)
+
+    MPSP = np.full((steps, steps), np.nan)
+    GWP = np.full((steps, steps), np.nan)
+    FEC = np.full((steps, steps), np.nan)
+
+    orig_titer = float(getattr(R301, 'titer', baseline_titer))
+    orig_yf = float(getattr(R301, 'caproic_acid_yield_factor', baseline_yield_factor))
+
+    set_titer = getattr(R301, 'set_C6_titer', lambda x: setattr(R301, 'titer', float(x)))
+    set_yf = getattr(R301, 'set_C6_yield_factor', lambda x: setattr(R301, 'caproic_acid_yield_factor', float(x)))
+
+    for i, ti in enumerate(titers):
+        set_titer(ti)
+        for j, yf in enumerate(yields):
+            set_yf(yf)
             try:
-                result = model(sample)
-                result['Titer'] = titer
-                result['Yield'] = yield_val
-                results.append(result)
-                completed += 1
-                
-                if completed % 10 == 0:
-                    print(f"Completed {completed}/{total_combinations} combinations")
-                    
-            except Exception as e:
-                print(f"Error at titer={titer:.2f}, yield={yield_val:.3f}: {e}")
-                continue
-    
-    if results:
-        results_df = pd.DataFrame(results)
-        print(f"\nTRY analysis completed! {len(results)} successful evaluations out of {total_combinations} total combinations")
-        
-        # Print summary statistics
-        print("\nSummary statistics:")
-        for col in ['MFSP', 'GWP', 'FEC', 'TCI']:
-            if col in results_df.columns:
-                print(f"{col}: min={results_df[col].min():.4f}, max={results_df[col].max():.4f}, mean={results_df[col].mean():.4f}")
-        
-        return results_df
-    else:
-        print("No successful evaluations in TRY analysis")
-        return None
+                sys.simulate()
+                MPSP[i, j] = tea_obj.solve_price(s.caproic_acid_product)
+                GWP[i, j] = lca.GWP
+                FEC[i, j] = lca.FEC
+            except Exception:
+                pass
+
+    set_titer(orig_titer)
+    set_yf(orig_yf)
+    sys.simulate()
+
+    base = os.path.dirname(__file__)
+    results_dir = os.path.join(base, 'analyses', 'results')
+    os.makedirs(results_dir, exist_ok=True)
+    now = datetime.now()
+    tag = f"microalgae_TRY_{steps}x{steps}_{now.year}.{now.month}.{now.day}-{now.hour}.{now.minute:02d}"
+
+    np.save(os.path.join(results_dir, tag + '_MPSP.npy'), MPSP)
+    np.save(os.path.join(results_dir, tag + '_GWP.npy'), GWP)
+    np.save(os.path.join(results_dir, tag + '_FEC.npy'), FEC)
+
+    pd.DataFrame(MPSP, index=np.round(titers, 4), columns=np.round(yields, 4)).to_csv(
+        os.path.join(results_dir, 'MPSP-' + tag + '.csv')
+    )
+    pd.DataFrame(GWP, index=np.round(titers, 4), columns=np.round(yields, 4)).to_csv(
+        os.path.join(results_dir, 'GWP-' + tag + '.csv')
+    )
+    pd.DataFrame(FEC, index=np.round(titers, 4), columns=np.round(yields, 4)).to_csv(
+        os.path.join(results_dir, 'FEC-' + tag + '.csv')
+    )
+
+    X, Y = np.meshgrid(np.round(yields, 4), np.round(titers, 4))  # X: Yield factor, Y: Titer
+
+    def _auto_levels(Z, n=12):
+        z = Z[~np.isnan(Z)]
+        if z.size == 0:
+            return np.linspace(0, 1, n)
+        vmin, vmax = float(np.nanmin(z)), float(np.nanmax(z))
+        if vmin == vmax:
+            vmax = vmin + 1e-6
+        return np.linspace(vmin, vmax, n)
+
+    def _plot_and_save(Z, title, cbar_label, fname):
+        levels = _auto_levels(Z)
+        fig, ax = plt.subplots(figsize=(6, 4.5), dpi=150)
+        cf = ax.contourf(X, Y, Z, levels=levels, cmap='YlGn')
+        c = ax.contour(X, Y, Z, levels=levels[::2], colors='k', linewidths=0.6)
+        ax.clabel(c, inline=True, fontsize=8, fmt='%.2f')
+        cb = fig.colorbar(cf, ax=ax)
+        cb.set_label(cbar_label)
+        ax.set_xlabel('Yield factor [-]')
+        ax.set_ylabel('Titer [g L$^{-1}$]')
+        ax.set_title(title)
+        fig.tight_layout()
+        fig.savefig(os.path.join(results_dir, fname), dpi=300)
+        plt.close(fig)
+
+    _plot_and_save(MPSP, 'MPSP contour', 'MPSP [$/kg]', f'MPSP_contour-{tag}.png')
+    _plot_and_save(GWP, 'GWP$_{100}$ contour', 'kg CO$_2$-eq (kg$^{-1}$)', f'GWP_contour-{tag}.png')
+    _plot_and_save(FEC, 'FEC contour', 'MJ (kg$^{-1}$)', f'FEC_contour-{tag}.png')
+
+    print(f"TRY saved to: {results_dir} (tag: {tag})")
+    return {
+        'titers': titers,
+        'yields': yields,
+        'MPSP': MPSP,
+        'GWP': GWP,
+        'FEC': FEC,
+        'results_dir': results_dir,
+        'tag': tag,
+    }
 
 def analyze_TRY_results(results_df, save_path=None):
     """Analyze TRY results and identify optimal regions"""
@@ -155,20 +167,7 @@ def analyze_TRY_results(results_df, save_path=None):
 
 if __name__ == '__main__':
     try:
-        results = run_TRY_analysis()
-        
-        if results is not None:
-            # Analyze results
-            analyze_TRY_results(results)
-            
-            # Save results
-            results_dir = 'results'
-            if not os.path.exists(results_dir):
-                os.makedirs(results_dir)
-            
-            save_path = os.path.join(results_dir, 'TRY_analysis_results.csv')
-            analyze_TRY_results(results, save_path)
-        
+        run_TRY_analysis()
     except Exception as e:
         print(f"Error in TRY analysis: {e}")
         import traceback

@@ -3,7 +3,7 @@
 Created on Sat July 05 12:50:00 2025
 
 Microalgae biorefinery to produce medium chain fatty acids 
-by anaerobic fermentation without external electron donor addition- system
+by anaerobic fermentation without external electron donor addition- system without keeping yeast 
 
 References
 ----------
