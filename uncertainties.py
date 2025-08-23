@@ -20,16 +20,15 @@ import pandas as pd
 import biosteam as bst
 # import contourplots
 from ._chemicals import chems
-from .system import create_microalgae_MCCA_production_sys, microalgae_tea
 from .tea import microalgae_tea as create_tea_for_system
 from .lca import create_microalgae_lca
+from importlib import import_module
 from .model_utils import MicroalgaeModel
 from biosteam.evaluation import Metric
 from datetime import datetime
 from biosteam.utils import TicToc
 import os
 
-chdir = os.chdir
 microalgae_filepath = os.path.dirname(__file__)
 microalgae_results_filepath = os.path.join(microalgae_filepath, 'analyses', 'results')
 
@@ -37,85 +36,69 @@ microalgae_results_filepath = os.path.join(microalgae_filepath, 'analyses', 'res
 if not os.path.exists(microalgae_results_filepath):
     os.makedirs(microalgae_results_filepath)
 
-# Explicitly create and simulate the system here to ensure streams are registered
-bst.settings.set_thermo(chems)
-microalgae_mcca_sys = create_microalgae_MCCA_production_sys()
-microalgae_mcca_sys.simulate()
-system = microalgae_sys = microalgae_mcca_sys
-tea = create_tea_for_system(microalgae_mcca_sys)
+def _get_system_creators():
+    systems = []  # (label, creator_fn)
+    create_baseline = getattr(import_module('.system', __package__), 'create_microalgae_MCCA_production_sys')
+    systems.append(('baseline', create_baseline))
+    create_no_yeast = getattr(import_module('.system_no_yeast', __package__), 'create_microalgae_MCCA_production_no_yeast_sys')
+    systems.append(('no_yeast', create_no_yeast))
+    create_noCyeast = getattr(import_module('.system_noCyeast', __package__), 'create_microalgae_MCCA_noCyeast_production_sys')
+    systems.append(('noCyeast', create_noCyeast))
+    create_ethanol = getattr(import_module('.system_ethanol', __package__), 'create_microalgae_MCCA_production_sys_ethanol')
+    systems.append(('ethanol', create_ethanol))
+    return systems
 
-# Create model with metrics
-def create_model():
-    """Create evaluation model with metrics for microalgae system"""
-    # Get system components
-    # System already simulated above; fetch registries
+def build_context_for_system(microalgae_mcca_sys, sys_label='baseline'):
     u = microalgae_mcca_sys.flowsheet.unit
     s = microalgae_mcca_sys.flowsheet.stream
-    
-    # Find main product and boiler
-    main_product = s.caproic_acid_product
-    main_product_chemical_IDs = ['CaproicAcid']
-    
-    # Find boiler
-    boiler = None
-    for unit in microalgae_mcca_sys.units:
-        if hasattr(unit, 'natural_gas') or 'BT' in unit.ID:
-            boiler = unit
-            break
-    
-    # Create LCA object
-    lca = create_microalgae_lca(microalgae_mcca_sys, main_product, main_product_chemical_IDs, boiler)
-    
-    # Define metrics
+    main_product = getattr(s, 'caproic_acid_product', None)
+    if main_product is None:
+        raise AttributeError('caproic_acid_product not found in flowsheet streams.')
+    boiler = next((unit for unit in microalgae_mcca_sys.units if ('BT' in unit.ID)), None)
+    lca = create_microalgae_lca(microalgae_mcca_sys, main_product, ['CaproicAcid'], boiler)
+    tea_obj = create_tea_for_system(microalgae_mcca_sys)
     metrics = [
-        Metric('MPSP', lambda: microalgae_tea.solve_price(main_product), '$/kg'),
-        Metric('TCI', lambda: microalgae_tea.TCI/1e6, 'MM$'),
-        Metric('VOC', lambda: microalgae_tea.VOC/1e6, 'MM$/y'),
-        Metric('FOC', lambda: microalgae_tea.FOC/1e6, 'MM$/y'),
+        Metric('MPSP', lambda: tea_obj.solve_price(main_product), '$/kg'),
+        Metric('TCI', lambda: tea_obj.TCI/1e6, 'MM$'),
+        Metric('VOC', lambda: tea_obj.VOC/1e6, 'MM$/y'),
+        Metric('FOC', lambda: tea_obj.FOC/1e6, 'MM$/y'),
         Metric('GWP', lambda: lca.GWP, 'kg CO2-eq/kg'),
         Metric('FEC', lambda: lca.FEC, 'MJ/kg'),
     ]
-    
-    # Create namespace for parameter loading
     namespace_dict = {
         'microalgae_sys': microalgae_mcca_sys,
-        'microalgae_tea': microalgae_tea,
+        'microalgae_tea': tea_obj,
         'u': u,
         's': s,
         'lca': lca,
         'bst': bst,
         'np': np,
-        # Add chemical streams for easier access
-        'microalgae': None,  # Will be set dynamically
-        'GlucoAmylase': None,  # Will be set dynamically
-        'AlphaAmylase': None,  # Will be set dynamically
-        'Yeast': None,
-        'OleylAlcohol': None,
-        'base_fermentation': None,
-        'FGD_lime': None,
         'PowerUtility': bst.PowerUtility,
     }
-    
-    # Try to find chemical streams
-    for stream in microalgae_mcca_sys.feeds:
-        if 'microalgae' in stream.ID.lower():
-            namespace_dict['microalgae'] = stream
-            break
-    
-    # Create model
+    # Provide system-specific alias names expected by parameter distribution 'Load statement'
+    if sys_label == 'baseline':
+        namespace_dict['microalgae_mcca_sys'] = microalgae_mcca_sys
+        namespace_dict['microalgae_tea_baseline'] = tea_obj
+    elif sys_label == 'no_yeast':
+        namespace_dict['microalgae_mcca_sys_no_yeast'] = microalgae_mcca_sys
+        namespace_dict['microalgae_tea_no_yeast'] = tea_obj
+        namespace_dict['microalgae_no_yeast_tea'] = tea_obj
+    elif sys_label == 'noCyeast':
+        namespace_dict['microalgae_mcca_noCyeast_sys'] = microalgae_mcca_sys
+        namespace_dict['microalgae_tea_noCyeast'] = tea_obj
+        namespace_dict['microalgae_noCyeast_tea'] = tea_obj
+    elif sys_label == 'ethanol':
+        namespace_dict['microalgae_mcca_sys_ethanol'] = microalgae_mcca_sys
+        namespace_dict['microalgae_tea_ethanol'] = tea_obj
+    # No universal aliases; only system-specific names are exposed to match each system's distribution file.
     model = MicroalgaeModel(microalgae_mcca_sys, metrics=metrics, namespace_dict=namespace_dict)
-    
-    return model, lca, namespace_dict
+    return model, tea_obj, lca, namespace_dict
 
-model, lca, namespace_dict = create_model()
-
-def get_adjusted_MSP():
-    """Get adjusted minimum selling price"""
-    return microalgae_tea.solve_price(microalgae_sys.flowsheet.stream.caproic_acid_product)
+ 
 
 # %% 
 
-N_simulations_per_mode = 2000 # 2000
+N_simulations_per_mode = 2000 # 2000 Monte Carlo
 
 percentiles = [0, 0.05, 0.1, 0.25, 0.5, 0.75, 0.9, 0.95, 1]
 
@@ -130,9 +113,13 @@ modes = [
             'baseline',
          ]
 
-parameter_distributions_filenames = [
-                                    'parameter_distributions.xlsx',
-                                    ]
+# Per-system parameter distribution files (Excel). Falls back to baseline file if specific one is missing.
+parameter_distributions_files = {
+    'baseline': 'parameter_distributions.xlsx',
+    'no_yeast': 'parameter_distributions_no_yeast.xlsx',
+    'noCyeast': 'parameter_distributions_noCyeast.xlsx',
+    'ethanol': 'parameter_distributions_ethanol.xlsx',
+}
 
 #%%
 
@@ -142,84 +129,54 @@ timer.tic()
 # Set seed to make sure each time the same set of random numbers will be used
 np.random.seed(3221)
 
-for i in range(len(modes)):
-    mode = modes[i]
-    parameter_distributions_filename = os.path.join(microalgae_filepath, parameter_distributions_filenames[i])
+systems_to_run = _get_system_creators()
+if not systems_to_run:
+    raise RuntimeError('No microalgae systems available to analyze.')
+
+for (sys_label, creator_fn) in systems_to_run:
+    print(f"\n===== Running uncertainty analysis for system: {sys_label} =====")
+    bst.settings.set_thermo(chems)
+    microalgae_mcca_sys = creator_fn()
+    microalgae_mcca_sys.simulate()
+    model, tea_obj, lca, namespace_dict = build_context_for_system(microalgae_mcca_sys, sys_label=sys_label)
+    mode = modes[0]
+    # Choose distribution file for this system label
+    fname = parameter_distributions_files.get(sys_label, parameter_distributions_files['baseline'])
+    parameter_distributions_filename = os.path.join(microalgae_filepath, fname)
+    if not os.path.isfile(parameter_distributions_filename):
+        raise FileNotFoundError(f"Parameter distributions file not found for '{sys_label}': {parameter_distributions_filename}")
     
-    print(f'\n\nLoading parameter distributions ({mode}) ...')
     model.parameters = ()
     model.load_parameter_distributions(parameter_distributions_filename, namespace_dict)
-    print(f'\nLoaded parameter distributions ({mode}).')
+    
     
     parameters = model.get_parameters()
     
-    print('\n\nLoading samples ...')
     samples = model.sample(N=N_simulations_per_mode, rule='L')
     model.load_samples(samples)
-    print('\nLoaded samples.')
+    
     
     model.exception_hook = 'warn'
-    print('\n\nSimulating baseline ...')
     baseline_initial = model.metrics_at_baseline()
     baseline = pd.DataFrame(data=np.array([[i for i in baseline_initial.values],]), 
                             columns=baseline_initial.keys())
     
-    results_dict['Baseline']['MPSP'][mode] = get_adjusted_MSP()
+    results_dict['Baseline']['MPSP'][mode] = tea_obj.solve_price(microalgae_mcca_sys.flowsheet.stream.caproic_acid_product)
+    print(f"MPSP: ${results_dict['Baseline']['MPSP'][mode]:.2f}/kg")
     results_dict['Baseline']['GWP100a'][mode] = tot_GWP = lca.GWP
+    print(f"GWP: {results_dict['Baseline']['GWP100a'][mode]:.4f} kg CO2-eq/kg")
     results_dict['Baseline']['FEC'][mode] = tot_FEC = lca.FEC
-    
-    # GWP breakdown analysis
-    # try:
-    #     material_GWP_breakdown = lca.material_GWP_breakdown
-        
-    #     results_dict['Baseline']['GWP Breakdown'][mode] = {
-    #         'feedstock': lca.feedstock_GWP,
-    #         'material inputs': lca.material_GWP,
-    #         'natural gas\n(for steam generation)': getattr(lca, 'ng_GWP', 0),
-    #         'net electricity': lca.net_electricity_GWP,
-    #         'direct non-biogenic\nemissions': getattr(lca, 'direct_emissions_GWP', 0),
-    #     }
-        
-    #     tot_positive_GWP = sum([v for v in results_dict['Baseline']['GWP Breakdown'][mode].values() if v>0])
-    #     if tot_positive_GWP > 0:
-    #         for k, v in results_dict['Baseline']['GWP Breakdown'][mode].items():
-    #             results_dict['Baseline']['GWP Breakdown'][mode][k] = v/tot_positive_GWP
-    # except Exception as e:
-    #     print(f"Warning: Could not calculate GWP breakdown: {e}")
-    #     results_dict['Baseline']['GWP Breakdown'][mode] = {}
-    
-    # # FEC breakdown analysis
-    # try:
-    #     material_FEC_breakdown = lca.material_FEC_breakdown
-        
-    #     results_dict['Baseline']['FEC Breakdown'][mode] = {
-    #         'feedstock': lca.feedstock_FEC,
-    #         'material inputs': lca.material_FEC,
-    #         'natural gas\n(for steam generation)': getattr(lca, 'ng_FEC', 0),
-    #         'net electricity': lca.net_electricity_FEC,
-    #     }
-        
-    #     tot_positive_FEC = sum([v for v in results_dict['Baseline']['FEC Breakdown'][mode].values() if v>0])
-    #     if tot_positive_FEC > 0:
-    #         for k, v in results_dict['Baseline']['FEC Breakdown'][mode].items():
-    #             results_dict['Baseline']['FEC Breakdown'][mode][k] = v/tot_positive_FEC
-    # except Exception as e:
-    #     print(f"Warning: Could not calculate FEC breakdown: {e}")
-    #     results_dict['Baseline']['FEC Breakdown'][mode] = {}
-        
-    print(f"\nSimulated baseline. MPSP = ${round(results_dict['Baseline']['MPSP'][mode],2)}/kg.")
-    print('\n\nEvaluating ...')
+    print(f"FEC: {results_dict['Baseline']['FEC'][mode]:.4f} MJ/kg")
+          
     model.evaluate(notify=notification_interval, autoload=None, autosave=None, file=None)
-    print('\nFinished evaluation.')
+    
         
     # Baseline results
-    print('\n\nRe-simulating baseline ...')
     baseline_end = model.metrics_at_baseline()
-    print(f"\nRe-simulated baseline. MPSP = ${round(results_dict['Baseline']['MPSP'][mode],2)}/kg.")
     dateTimeObj = datetime.now()
     minute = '0' + str(dateTimeObj.minute) if len(str(dateTimeObj.minute))==1 else str(dateTimeObj.minute)
     file_to_save = os.path.join(microalgae_results_filepath,
-        f'_microalgae_{dateTimeObj.year}.{dateTimeObj.month}.{dateTimeObj.day}-{dateTimeObj.hour}.{minute}'\
+        f'_microalgae_{sys_label}_{dateTimeObj.year}.{dateTimeObj.month}.{dateTimeObj.day}-{dateTimeObj.hour}.{minute}'\
         + f'_{N_simulations_per_mode}sims')
     
     baseline.index = ('initial', )
@@ -267,8 +224,6 @@ for i in range(len(modes)):
                           value=probabilities[p.name],
                           allow_duplicates=True)
     
-    run_number = samples.shape[0]
-    
     #%%
     '''Output to Excel'''
     with pd.ExcelWriter(file_to_save+'_'+mode+'_1_full_evaluation.xlsx') as writer:
@@ -305,19 +260,16 @@ for i in range(len(modes)):
     if mpsp_col is not None:
         results_dict['Uncertainty']['MPSP'][mode] = model.table[mpsp_col]
     else:
-        print("Warning: Could not find MPSP column in results")
         results_dict['Uncertainty']['MPSP'][mode] = [results_dict['Baseline']['MPSP'][mode]] * len(model.table)
     
     if gwp_col is not None:
         results_dict['Uncertainty']['GWP100a'][mode] = model.table[gwp_col]
     else:
-        print("Warning: Could not find GWP column in results")
         results_dict['Uncertainty']['GWP100a'][mode] = [results_dict['Baseline']['GWP100a'][mode]] * len(model.table)
     
     if fec_col is not None:
         results_dict['Uncertainty']['FEC'][mode] = model.table[fec_col]
     else:
-        print("Warning: Could not find FEC column in results")
         results_dict['Uncertainty']['FEC'][mode] = [results_dict['Baseline']['FEC'][mode]] * len(model.table)
     
     # Spearman correlations for sensitivity analysis
@@ -340,7 +292,6 @@ for i in range(len(modes)):
             
 #%% Clean up NaN values for plotting
 metrics = ['MPSP', 'GWP100a', 'FEC']
-tot_NaN_vals_dict = results_dict['Errors'] = {metric: {mode: 0 for mode in modes} for metric in metrics}
 for mode in modes:
     for metric in metrics:
         median_val = 1.5  # Default fallback value
@@ -352,7 +303,6 @@ for mode in modes:
         for i in range(len(results_dict['Uncertainty'][metric][mode])):
             if np.isnan(results_dict['Uncertainty'][metric][mode].iloc[i]):
                 results_dict['Uncertainty'][metric][mode].iloc[i] = median_val
-                tot_NaN_vals_dict[metric][mode] += 1
 
 # %% Plots - temporarily disabled due to contourplots dependency
 # MPSP_units = r"$\mathrm{\$}\cdot\mathrm{kg}^{-1}$"
@@ -365,135 +315,3 @@ def get_small_range(num, offset):
     return(num-offset, num+offset)
 
 print(f'\nAnalysis completed. Timer: {timer.toc():.2f} seconds')
-print(f'Results saved to: {file_to_save}')
-
-# Print summary
-print('\n=== UNCERTAINTY ANALYSIS SUMMARY ===')
-for mode in modes:
-    print(f'\n{mode.upper()} MODE:')
-    print(f'  MPSP: {results_dict["Baseline"]["MPSP"][mode]:.3f} $/kg')
-    print(f'  GWP: {results_dict["Baseline"]["GWP100a"][mode]:.3f} kg CO2-eq/kg')
-    print(f'  FEC: {results_dict["Baseline"]["FEC"][mode]:.3f} MJ/kg')
-    
-    if len(results_dict['Uncertainty']['MPSP'][mode]) > 0:
-        print(f'  MPSP range: {np.min(results_dict["Uncertainty"]["MPSP"][mode]):.3f} - {np.max(results_dict["Uncertainty"]["MPSP"][mode]):.3f} $/kg')
-        print(f'  GWP range: {np.min(results_dict["Uncertainty"]["GWP100a"][mode]):.3f} - {np.max(results_dict["Uncertainty"]["GWP100a"][mode]):.3f} kg CO2-eq/kg')
-        print(f'  FEC range: {np.min(results_dict["Uncertainty"]["FEC"][mode]):.3f} - {np.max(results_dict["Uncertainty"]["FEC"][mode]):.3f} MJ/kg')
-
-# # Print detailed breakdown analysis
-# print('\n=== DETAILED BREAKDOWN ANALYSIS ===')
-# for mode in modes:
-#     print(f'\n{mode.upper()} MODE BREAKDOWN:')
-    
-#     # GWP Breakdown
-#     if results_dict['Baseline']['GWP Breakdown'][mode]:
-#         print(f'\nGWP Breakdown (Total: {results_dict["Baseline"]["GWP100a"][mode]:.3f} kg CO2-eq/kg):')
-#         gwp_breakdown = results_dict['Baseline']['GWP Breakdown'][mode]
-#         total_gwp = sum([abs(v) for v in gwp_breakdown.values()])
-#         for component, value in gwp_breakdown.items():
-#             percentage = (value / total_gwp * 100) if total_gwp > 0 else 0
-#             print(f'  {component}: {value:.4f} kg CO2-eq/kg ({percentage:.1f}%)')
-    
-#     # FEC Breakdown
-#     if results_dict['Baseline']['FEC Breakdown'][mode]:
-#         print(f'\nFEC Breakdown (Total: {results_dict["Baseline"]["FEC"][mode]:.3f} MJ/kg):')
-#         fec_breakdown = results_dict['Baseline']['FEC Breakdown'][mode]
-#         total_fec = sum([abs(v) for v in fec_breakdown.values()])
-#         for component, value in fec_breakdown.items():
-#             percentage = (value / total_fec * 100) if total_fec > 0 else 0
-#             print(f'  {component}: {value:.4f} MJ/kg ({percentage:.1f}%)')
-            
-# # Print sensitivity analysis results
-# print('\n=== SENSITIVITY ANALYSIS (SPEARMAN CORRELATIONS) ===')
-# for mode in modes:
-#     print(f'\n{mode.upper()} MODE SENSITIVITY:')
-    
-#     # MPSP Correlations
-#     if not results_dict['Sensitivity']['Spearman']['MPSP'][mode].empty:
-#         print(f'\nTop 10 correlations with MPSP:')
-#         mpsp_corr = results_dict['Sensitivity']['Spearman']['MPSP'][mode].copy()
-#         # Remove NaN values and sort by absolute correlation
-#         mpsp_corr = mpsp_corr.dropna()
-#         if len(mpsp_corr) > 0:
-#             sorted_corr = mpsp_corr.abs().sort_values(ascending=False)
-#             for i, (param, abs_corr) in enumerate(sorted_corr.head(10).items()):
-#                 actual_corr = mpsp_corr[param]
-#                 print(f'  {i+1:2d}. {param}: {actual_corr:.3f}')
-#         else:
-#             print('    No significant correlations found')
-    
-#     # GWP Correlations
-#     if not results_dict['Sensitivity']['Spearman']['GWP100a'][mode].empty:
-#         print(f'\nTop 10 correlations with GWP:')
-#         gwp_corr = results_dict['Sensitivity']['Spearman']['GWP100a'][mode].copy()
-#         gwp_corr = gwp_corr.dropna()
-#         if len(gwp_corr) > 0:
-#             sorted_corr = gwp_corr.abs().sort_values(ascending=False)
-#             for i, (param, abs_corr) in enumerate(sorted_corr.head(10).items()):
-#                 actual_corr = gwp_corr[param]
-#                 print(f'  {i+1:2d}. {param}: {actual_corr:.3f}')
-#         else:
-#             print('    No significant correlations found')
-    
-#     # FEC Correlations
-#     if not results_dict['Sensitivity']['Spearman']['FEC'][mode].empty:
-#         print(f'\nTop 10 correlations with FEC:')
-#         fec_corr = results_dict['Sensitivity']['Spearman']['FEC'][mode].copy()
-#         fec_corr = fec_corr.dropna()
-#         if len(fec_corr) > 0:
-#             sorted_corr = fec_corr.abs().sort_values(ascending=False)
-#             for i, (param, abs_corr) in enumerate(sorted_corr.head(10).items()):
-#                 actual_corr = fec_corr[param]
-#                 print(f'  {i+1:2d}. {param}: {actual_corr:.3f}')
-#         else:
-#             print('    No significant correlations found')
-
-# # Print statistics summary
-# print('\n=== STATISTICAL SUMMARY ===')
-# for mode in modes:
-#     print(f'\n{mode.upper()} MODE STATISTICS:')
-    
-#     for metric in ['MPSP', 'GWP100a', 'FEC']:
-#         if len(results_dict['Uncertainty'][metric][mode]) > 0:
-#             data = results_dict['Uncertainty'][metric][mode]
-#             mean_val = np.mean(data)
-#             std_val = np.std(data)
-#             p5 = np.percentile(data, 5)
-#             p95 = np.percentile(data, 95)
-#             median_val = np.median(data)
-            
-#             units = {'MPSP': '$/kg', 'GWP100a': 'kg CO2-eq/kg', 'FEC': 'MJ/kg'}
-#             unit = units[metric]
-            
-#             print(f'\n{metric}:')
-#             print(f'  Mean: {mean_val:.3f} {unit}')
-#             print(f'  Std Dev: {std_val:.3f} {unit}')
-#             print(f'  Median: {median_val:.3f} {unit}')
-#             print(f'  5th percentile: {p5:.3f} {unit}')
-#             print(f'  95th percentile: {p95:.3f} {unit}')
-#             print(f'  Range: {np.min(data):.3f} - {np.max(data):.3f} {unit}')
-
-# # Print error summary
-# print('\n=== ERROR SUMMARY ===')
-# total_errors = 0
-# for metric in metrics:
-#     for mode in modes:
-#         errors = tot_NaN_vals_dict[metric][mode]
-#         if errors > 0:
-#             print(f'{metric} ({mode}): {errors} NaN values replaced')
-#             total_errors += errors
-
-# if total_errors == 0:
-#     print('No errors encountered during simulation.')
-# else:
-#     print(f'Total errors handled: {total_errors}')
-
-print(f'\n=== ANALYSIS COMPLETED ===')
-print(f'Total simulation time: {timer.toc():.2f} seconds')
-print(f'Results saved to: {file_to_save}')
-print(f'Number of parameters analyzed: {len(parameters)}')
-print(f'Number of successful simulations: {len(model.table)}')
-print(f'Output files generated:')
-print(f'  - Baseline: {file_to_save}_{mode}_0_baseline.xlsx')
-print(f'  - Full results: {file_to_save}_{mode}_1_full_evaluation.xlsx')
-
