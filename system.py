@@ -34,7 +34,7 @@ from .units import (
 )
 from .utils import price
 from ._chemicals import chems
-from .tea import create_tea
+from .tea import microalgae_tea
 from .streams import microalgae_feed
 import warnings
 # Filter out specific warnings
@@ -131,7 +131,7 @@ def create_microalgae_MCCA_production_sys(ins, outs):
     yeast_mass = microalgae_mass * 5 / 75
     fresh_yeast = Stream('fresh_yeast', Yeast=yeast_mass, units='kg/hr', price=price['Yeast'])
     yeast_recycle = Stream('yeast_recycle', Yeast=0, units='kg/hr')
-    yeast_feed = bst.Stream() 
+    yeast_feed = bst.Stream('yeast') 
     # OleylAlcohol for extraction
     fresh_oleylalcohol = Stream('fresh_oleylalcohol', OleylAlcohol=200, units='kg/hr', price=price['OleylAlcohol'])
     oleylalcohol_recycle = Stream('oleylalcohol_recycle', OleylAlcohol=50, units='kg/hr')
@@ -360,20 +360,7 @@ microalgae_mcca_sys.simulate()
 # TEA analysis
 # Dry biomass feed rate in ton per day (t/d)
 dry_tpd = u.U101.ins[0].F_mass * 24 / 1000  # kg/h -> t/d
-microalgae_tea = create_tea(system=microalgae_mcca_sys, IRR=0.10, duration=(2024, 2045),
-    depreciation='MACRS7', income_tax=0.21, 
-        operating_days=330,
-    lang_factor= None, construction_schedule=(0.08, 0.60, 0.32),
-    startup_months=3, startup_FOCfrac=1, startup_salesfrac=0.5,
-    startup_VOCfrac=0.75, WC_over_FCI=0.05,
-    finance_interest=0.08, finance_years=10, finance_fraction=0.4,
-        OSBL_units=(u.CT, u.CWP, u.ADP, u.PWC, u.BT601),
-    warehouse=0.04, site_development=0.09, additional_piping=0.045,
-    proratable_costs=0.10, field_expenses=0.10, construction=0.20,
-    contingency=0.10, other_indirect_costs=0.10, 
-    labor_cost=max(0.5e6, compute_labor_cost(dry_tpd)),
-        labor_burden=0.90, property_insurance=0.007, maintenance=0.03, boiler_turbogenerator=u.BT601,
-    steam_power_depreciation='MACRS20')
+microalgae_tea = microalgae_tea(microalgae_mcca_sys)
 
 if __name__ == '__main__':
     microalgae_mcca_sys.diagram('cluster', format='png')
@@ -381,13 +368,10 @@ if __name__ == '__main__':
     print("\n===== Techno-Economic Analysis (TEA) Main Results =====")
     # Use the system's main product stream directly for price calculation
     caproic_acid_product = s.caproic_acid_product
-    if caproic_acid_product is not None:
-        if caproic_acid_product.price is None or caproic_acid_product.price == 0:
-            caproic_acid_product.price = 4.5
-        price = microalgae_tea.solve_price(caproic_acid_product)
-        print(f"Caproic Acid Minimum Selling Price: {price:.2f} $/kg")
-        if caproic_acid_product.F_mass > 0 and caproic_acid_product.price > 0:
-            print("Caproic Acid Unit Production Cost:", microalgae_tea.production_costs([caproic_acid_product]))
+    price = microalgae_tea.solve_price(caproic_acid_product)
+    print(f"Caproic Acid Minimum Selling Price: {price:.2f} $/kg")
+    if caproic_acid_product.F_mass > 0 and caproic_acid_product.price > 0:
+        print("Caproic Acid Unit Production Cost:", microalgae_tea.production_costs([caproic_acid_product]))
     print("NPV:", microalgae_tea.NPV)
     print("TCI:", microalgae_tea.TCI)
     print("FCI:", microalgae_tea.FCI)

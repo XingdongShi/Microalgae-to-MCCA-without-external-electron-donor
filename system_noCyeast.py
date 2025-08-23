@@ -29,7 +29,7 @@ from biosteam.units import Pump, StorageTank, HXutility, Mixer, Splitter, MultiS
 from biosteam.facilities import AirDistributionPackage, ProcessWaterCenter, CoolingTower, ChilledWaterPackage, HeatExchangerNetwork
 from biosteam import main_flowsheet
 from .units import (
-    FeedstockPreprocessing, AcidPretreatmentReactor, Saccharification, SolidLiquidSeparation, MCCAFermentation_no_yeast, 
+    FeedstockPreprocessing, AcidPretreatmentReactor, Saccharification, SolidLiquidSeparation, MCCAFermentation, 
     NeutralizationTank, AnaerobicDigestion
 )
 from .utils import price
@@ -72,7 +72,7 @@ bst.System.default_relative_molar_tolerance = 1e-1 # supersedes absolute toleran
 bst.System.strict_convergence = False # True => throw exception if system does not converge; False => continue with unconverged system
 
 @SystemFactory(
-    ID='Microalgae_MCCA_production_no_yeast',
+    ID='Microalgae_MCCA_noCyeast_production',
     ins=[dict(microalgae_feed, thermo=chems)],
     outs=[
           #dict(ID='butanol_product', thermo=chems), 
@@ -81,7 +81,7 @@ bst.System.strict_convergence = False # True => throw exception if system does n
           dict(ID='heptanoic_acid_product', thermo=chems), 
           dict(ID='caprylic_acid_product', thermo=chems)]
     )
-def create_microalgae_MCCA_production_no_yeast_sys(ins, outs):
+def create_microalgae_MCCA_noCyeast_production_sys(ins, outs):
     # Set the thermodynamic package explicitly
     tmo.settings.set_thermo(chems)
     
@@ -127,6 +127,9 @@ def create_microalgae_MCCA_production_no_yeast_sys(ins, outs):
     naoh2_mass = microalgae_mass * 0.02 # pH 5.5
     total_naoh_mass = naoh1_mass + naoh2_mass
     naoh = Stream('naoh', NaOH=total_naoh_mass, units='kg/hr', price=price['NaOH'])
+    # Yeast addition in MCCA fermentation
+    yeast_mass = microalgae_mass * 5 / 75
+    fresh_yeast = Stream('fresh_yeast', Yeast=yeast_mass, units='kg/hr', price=price['Yeast'])
     # OleylAlcohol for extraction
     fresh_oleylalcohol = Stream('fresh_oleylalcohol', OleylAlcohol=200, units='kg/hr', price=price['OleylAlcohol'])
     oleylalcohol_recycle = Stream('oleylalcohol_recycle', OleylAlcohol=50, units='kg/hr')
@@ -176,9 +179,9 @@ def create_microalgae_MCCA_production_no_yeast_sys(ins, outs):
     # Area 3: Fermentation for MCCA production
     # =====================
     H301 = HXutility('H301', P208-0, T=37+273.15)
-    T301 = StorageTank('T301', H301-0)
+    T301 = StorageTank('T301', fresh_yeast)
     P301 = Pump('P301', T301-0)
-    R301 = MCCAFermentation_no_yeast('R301', P301-0, microalgae_mass_flow=microalgae_mass, titer = 1.208)
+    R301 = MCCAFermentation('R301', [H301-0, P301-0], microalgae_mass_flow=microalgae_mass, titer = 2.003)
 
     # Add C6 yield factor specification
     @R301.add_specification(run=True)
@@ -339,43 +342,43 @@ def create_microalgae_MCCA_production_no_yeast_sys(ins, outs):
 # Create system and TEA objects at module level for import
 u = flowsheet.unit
 s = flowsheet.stream
-microalgae_mcca_sys_no_yeast = create_microalgae_MCCA_production_no_yeast_sys()
-microalgae_mcca_sys_no_yeast.simulate()
+microalgae_mcca_noCyeast_sys = create_microalgae_MCCA_noCyeast_production_sys()
+microalgae_mcca_noCyeast_sys.simulate()
 
 # TEA analysis
 # Dry biomass feed rate in ton per day (t/d)
 dry_tpd = u.U101.ins[0].F_mass * 24 / 1000  # kg/h -> t/d
-microalgae_tea_no_yeast = microalgae_tea(microalgae_mcca_sys_no_yeast)
+microalgae_noCyeast_tea = microalgae_tea(microalgae_mcca_noCyeast_sys)
 
 if __name__ == '__main__':
-    microalgae_mcca_sys_no_yeast.diagram('cluster', format='png')
-    microalgae_mcca_sys_no_yeast.print()
+    microalgae_mcca_noCyeast_sys.diagram('cluster', format='png')
+    microalgae_mcca_noCyeast_sys.print()
     print("\n===== Techno-Economic Analysis (TEA) Main Results =====")
     # Use the system's main product stream directly for price calculation
     caproic_acid_product = s.caproic_acid_product
     if caproic_acid_product is not None:
         if caproic_acid_product.price is None or caproic_acid_product.price == 0:
             caproic_acid_product.price = 4.5
-        price = microalgae_tea_no_yeast.solve_price(caproic_acid_product)
+        price = microalgae_noCyeast_tea.solve_price(caproic_acid_product)
         print(f"Caproic Acid Minimum Selling Price: {price:.2f} $/kg")
         if caproic_acid_product.F_mass > 0 and caproic_acid_product.price > 0:
-            print("Caproic Acid Unit Production Cost:", microalgae_tea_no_yeast.production_costs([caproic_acid_product]))
-    print("NPV:", microalgae_tea_no_yeast.NPV)
-    print("TCI:", microalgae_tea_no_yeast.TCI)
-    print("FCI:", microalgae_tea_no_yeast.FCI)
-    print("DPI:", microalgae_tea_no_yeast.DPI)
-    print("TDC:", microalgae_tea_no_yeast.TDC)
-    print("FOC:", microalgae_tea_no_yeast.FOC)
-    print("VOC:", microalgae_tea_no_yeast.VOC)
-    print("AOC:", microalgae_tea_no_yeast.AOC)
-    print("ROI:", microalgae_tea_no_yeast.ROI)
-    print("PBP:", microalgae_tea_no_yeast.PBP)
-    print("Annual Depreciation:", microalgae_tea_no_yeast.annual_depreciation)
-    print("Sales:", microalgae_tea_no_yeast.sales)
-    print("Material Cost:", microalgae_tea_no_yeast.material_cost)
-    print("Utility Cost:", microalgae_tea_no_yeast.utility_cost)
-    print("CAPEX Table:\n", microalgae_tea_no_yeast.CAPEX_table())
-    print("FOC Table:\n", microalgae_tea_no_yeast.FOC_table())
-    print("Cashflow Table:\n", microalgae_tea_no_yeast.get_cashflow_table())
-
-
+            print("Caproic Acid Unit Production Cost:", microalgae_noCyeast_tea.production_costs([caproic_acid_product]))
+    print("NPV:", microalgae_noCyeast_tea.NPV)
+    print("TCI:", microalgae_noCyeast_tea.TCI)
+    print("FCI:", microalgae_noCyeast_tea.FCI)
+    print("DPI:", microalgae_noCyeast_tea.DPI)
+    print("TDC:", microalgae_noCyeast_tea.TDC)
+    print("FOC:", microalgae_noCyeast_tea.FOC)
+    print("VOC:", microalgae_noCyeast_tea.VOC)
+    print("AOC:", microalgae_noCyeast_tea.AOC)
+    print("ROI:", microalgae_noCyeast_tea.ROI)
+    print("PBP:", microalgae_noCyeast_tea.PBP)
+    print("Annual Depreciation:", microalgae_noCyeast_tea.annual_depreciation)
+    print("Sales:", microalgae_noCyeast_tea.sales)
+    print("Material Cost:", microalgae_noCyeast_tea.material_cost)
+    print("Utility Cost:", microalgae_noCyeast_tea.utility_cost)
+    print("CAPEX Table:\n", microalgae_noCyeast_tea.CAPEX_table())
+    print("FOC Table:\n", microalgae_noCyeast_tea.FOC_table())
+    print("Cashflow Table:\n", microalgae_noCyeast_tea.get_cashflow_table())
+    
+ 

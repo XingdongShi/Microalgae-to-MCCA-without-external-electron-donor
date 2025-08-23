@@ -19,7 +19,9 @@ import numpy as np
 import pandas as pd
 import biosteam as bst
 # import contourplots
-from .system import microalgae_mcca_sys, microalgae_tea
+from ._chemicals import chems
+from .system import create_microalgae_MCCA_production_sys, microalgae_tea
+from .tea import microalgae_tea as create_tea_for_system
 from .lca import create_microalgae_lca
 from .model_utils import MicroalgaeModel
 from biosteam.evaluation import Metric
@@ -35,13 +37,18 @@ microalgae_results_filepath = os.path.join(microalgae_filepath, 'analyses', 'res
 if not os.path.exists(microalgae_results_filepath):
     os.makedirs(microalgae_results_filepath)
 
+# Explicitly create and simulate the system here to ensure streams are registered
+bst.settings.set_thermo(chems)
+microalgae_mcca_sys = create_microalgae_MCCA_production_sys()
+microalgae_mcca_sys.simulate()
 system = microalgae_sys = microalgae_mcca_sys
-tea = microalgae_tea
+tea = create_tea_for_system(microalgae_mcca_sys)
 
 # Create model with metrics
 def create_model():
     """Create evaluation model with metrics for microalgae system"""
     # Get system components
+    # System already simulated above; fetch registries
     u = microalgae_mcca_sys.flowsheet.unit
     s = microalgae_mcca_sys.flowsheet.stream
     
@@ -373,113 +380,113 @@ for mode in modes:
         print(f'  GWP range: {np.min(results_dict["Uncertainty"]["GWP100a"][mode]):.3f} - {np.max(results_dict["Uncertainty"]["GWP100a"][mode]):.3f} kg CO2-eq/kg')
         print(f'  FEC range: {np.min(results_dict["Uncertainty"]["FEC"][mode]):.3f} - {np.max(results_dict["Uncertainty"]["FEC"][mode]):.3f} MJ/kg')
 
-# Print detailed breakdown analysis
-print('\n=== DETAILED BREAKDOWN ANALYSIS ===')
-for mode in modes:
-    print(f'\n{mode.upper()} MODE BREAKDOWN:')
+# # Print detailed breakdown analysis
+# print('\n=== DETAILED BREAKDOWN ANALYSIS ===')
+# for mode in modes:
+#     print(f'\n{mode.upper()} MODE BREAKDOWN:')
     
-    # GWP Breakdown
-    if results_dict['Baseline']['GWP Breakdown'][mode]:
-        print(f'\nGWP Breakdown (Total: {results_dict["Baseline"]["GWP100a"][mode]:.3f} kg CO2-eq/kg):')
-        gwp_breakdown = results_dict['Baseline']['GWP Breakdown'][mode]
-        total_gwp = sum([abs(v) for v in gwp_breakdown.values()])
-        for component, value in gwp_breakdown.items():
-            percentage = (value / total_gwp * 100) if total_gwp > 0 else 0
-            print(f'  {component}: {value:.4f} kg CO2-eq/kg ({percentage:.1f}%)')
+#     # GWP Breakdown
+#     if results_dict['Baseline']['GWP Breakdown'][mode]:
+#         print(f'\nGWP Breakdown (Total: {results_dict["Baseline"]["GWP100a"][mode]:.3f} kg CO2-eq/kg):')
+#         gwp_breakdown = results_dict['Baseline']['GWP Breakdown'][mode]
+#         total_gwp = sum([abs(v) for v in gwp_breakdown.values()])
+#         for component, value in gwp_breakdown.items():
+#             percentage = (value / total_gwp * 100) if total_gwp > 0 else 0
+#             print(f'  {component}: {value:.4f} kg CO2-eq/kg ({percentage:.1f}%)')
     
-    # FEC Breakdown
-    if results_dict['Baseline']['FEC Breakdown'][mode]:
-        print(f'\nFEC Breakdown (Total: {results_dict["Baseline"]["FEC"][mode]:.3f} MJ/kg):')
-        fec_breakdown = results_dict['Baseline']['FEC Breakdown'][mode]
-        total_fec = sum([abs(v) for v in fec_breakdown.values()])
-        for component, value in fec_breakdown.items():
-            percentage = (value / total_fec * 100) if total_fec > 0 else 0
-            print(f'  {component}: {value:.4f} MJ/kg ({percentage:.1f}%)')
+#     # FEC Breakdown
+#     if results_dict['Baseline']['FEC Breakdown'][mode]:
+#         print(f'\nFEC Breakdown (Total: {results_dict["Baseline"]["FEC"][mode]:.3f} MJ/kg):')
+#         fec_breakdown = results_dict['Baseline']['FEC Breakdown'][mode]
+#         total_fec = sum([abs(v) for v in fec_breakdown.values()])
+#         for component, value in fec_breakdown.items():
+#             percentage = (value / total_fec * 100) if total_fec > 0 else 0
+#             print(f'  {component}: {value:.4f} MJ/kg ({percentage:.1f}%)')
             
-# Print sensitivity analysis results
-print('\n=== SENSITIVITY ANALYSIS (SPEARMAN CORRELATIONS) ===')
-for mode in modes:
-    print(f'\n{mode.upper()} MODE SENSITIVITY:')
+# # Print sensitivity analysis results
+# print('\n=== SENSITIVITY ANALYSIS (SPEARMAN CORRELATIONS) ===')
+# for mode in modes:
+#     print(f'\n{mode.upper()} MODE SENSITIVITY:')
     
-    # MPSP Correlations
-    if not results_dict['Sensitivity']['Spearman']['MPSP'][mode].empty:
-        print(f'\nTop 10 correlations with MPSP:')
-        mpsp_corr = results_dict['Sensitivity']['Spearman']['MPSP'][mode].copy()
-        # Remove NaN values and sort by absolute correlation
-        mpsp_corr = mpsp_corr.dropna()
-        if len(mpsp_corr) > 0:
-            sorted_corr = mpsp_corr.abs().sort_values(ascending=False)
-            for i, (param, abs_corr) in enumerate(sorted_corr.head(10).items()):
-                actual_corr = mpsp_corr[param]
-                print(f'  {i+1:2d}. {param}: {actual_corr:.3f}')
-        else:
-            print('    No significant correlations found')
+#     # MPSP Correlations
+#     if not results_dict['Sensitivity']['Spearman']['MPSP'][mode].empty:
+#         print(f'\nTop 10 correlations with MPSP:')
+#         mpsp_corr = results_dict['Sensitivity']['Spearman']['MPSP'][mode].copy()
+#         # Remove NaN values and sort by absolute correlation
+#         mpsp_corr = mpsp_corr.dropna()
+#         if len(mpsp_corr) > 0:
+#             sorted_corr = mpsp_corr.abs().sort_values(ascending=False)
+#             for i, (param, abs_corr) in enumerate(sorted_corr.head(10).items()):
+#                 actual_corr = mpsp_corr[param]
+#                 print(f'  {i+1:2d}. {param}: {actual_corr:.3f}')
+#         else:
+#             print('    No significant correlations found')
     
-    # GWP Correlations
-    if not results_dict['Sensitivity']['Spearman']['GWP100a'][mode].empty:
-        print(f'\nTop 10 correlations with GWP:')
-        gwp_corr = results_dict['Sensitivity']['Spearman']['GWP100a'][mode].copy()
-        gwp_corr = gwp_corr.dropna()
-        if len(gwp_corr) > 0:
-            sorted_corr = gwp_corr.abs().sort_values(ascending=False)
-            for i, (param, abs_corr) in enumerate(sorted_corr.head(10).items()):
-                actual_corr = gwp_corr[param]
-                print(f'  {i+1:2d}. {param}: {actual_corr:.3f}')
-        else:
-            print('    No significant correlations found')
+#     # GWP Correlations
+#     if not results_dict['Sensitivity']['Spearman']['GWP100a'][mode].empty:
+#         print(f'\nTop 10 correlations with GWP:')
+#         gwp_corr = results_dict['Sensitivity']['Spearman']['GWP100a'][mode].copy()
+#         gwp_corr = gwp_corr.dropna()
+#         if len(gwp_corr) > 0:
+#             sorted_corr = gwp_corr.abs().sort_values(ascending=False)
+#             for i, (param, abs_corr) in enumerate(sorted_corr.head(10).items()):
+#                 actual_corr = gwp_corr[param]
+#                 print(f'  {i+1:2d}. {param}: {actual_corr:.3f}')
+#         else:
+#             print('    No significant correlations found')
     
-    # FEC Correlations
-    if not results_dict['Sensitivity']['Spearman']['FEC'][mode].empty:
-        print(f'\nTop 10 correlations with FEC:')
-        fec_corr = results_dict['Sensitivity']['Spearman']['FEC'][mode].copy()
-        fec_corr = fec_corr.dropna()
-        if len(fec_corr) > 0:
-            sorted_corr = fec_corr.abs().sort_values(ascending=False)
-            for i, (param, abs_corr) in enumerate(sorted_corr.head(10).items()):
-                actual_corr = fec_corr[param]
-                print(f'  {i+1:2d}. {param}: {actual_corr:.3f}')
-        else:
-            print('    No significant correlations found')
+#     # FEC Correlations
+#     if not results_dict['Sensitivity']['Spearman']['FEC'][mode].empty:
+#         print(f'\nTop 10 correlations with FEC:')
+#         fec_corr = results_dict['Sensitivity']['Spearman']['FEC'][mode].copy()
+#         fec_corr = fec_corr.dropna()
+#         if len(fec_corr) > 0:
+#             sorted_corr = fec_corr.abs().sort_values(ascending=False)
+#             for i, (param, abs_corr) in enumerate(sorted_corr.head(10).items()):
+#                 actual_corr = fec_corr[param]
+#                 print(f'  {i+1:2d}. {param}: {actual_corr:.3f}')
+#         else:
+#             print('    No significant correlations found')
 
-# Print statistics summary
-print('\n=== STATISTICAL SUMMARY ===')
-for mode in modes:
-    print(f'\n{mode.upper()} MODE STATISTICS:')
+# # Print statistics summary
+# print('\n=== STATISTICAL SUMMARY ===')
+# for mode in modes:
+#     print(f'\n{mode.upper()} MODE STATISTICS:')
     
-    for metric in ['MPSP', 'GWP100a', 'FEC']:
-        if len(results_dict['Uncertainty'][metric][mode]) > 0:
-            data = results_dict['Uncertainty'][metric][mode]
-            mean_val = np.mean(data)
-            std_val = np.std(data)
-            p5 = np.percentile(data, 5)
-            p95 = np.percentile(data, 95)
-            median_val = np.median(data)
+#     for metric in ['MPSP', 'GWP100a', 'FEC']:
+#         if len(results_dict['Uncertainty'][metric][mode]) > 0:
+#             data = results_dict['Uncertainty'][metric][mode]
+#             mean_val = np.mean(data)
+#             std_val = np.std(data)
+#             p5 = np.percentile(data, 5)
+#             p95 = np.percentile(data, 95)
+#             median_val = np.median(data)
             
-            units = {'MPSP': '$/kg', 'GWP100a': 'kg CO2-eq/kg', 'FEC': 'MJ/kg'}
-            unit = units[metric]
+#             units = {'MPSP': '$/kg', 'GWP100a': 'kg CO2-eq/kg', 'FEC': 'MJ/kg'}
+#             unit = units[metric]
             
-            print(f'\n{metric}:')
-            print(f'  Mean: {mean_val:.3f} {unit}')
-            print(f'  Std Dev: {std_val:.3f} {unit}')
-            print(f'  Median: {median_val:.3f} {unit}')
-            print(f'  5th percentile: {p5:.3f} {unit}')
-            print(f'  95th percentile: {p95:.3f} {unit}')
-            print(f'  Range: {np.min(data):.3f} - {np.max(data):.3f} {unit}')
+#             print(f'\n{metric}:')
+#             print(f'  Mean: {mean_val:.3f} {unit}')
+#             print(f'  Std Dev: {std_val:.3f} {unit}')
+#             print(f'  Median: {median_val:.3f} {unit}')
+#             print(f'  5th percentile: {p5:.3f} {unit}')
+#             print(f'  95th percentile: {p95:.3f} {unit}')
+#             print(f'  Range: {np.min(data):.3f} - {np.max(data):.3f} {unit}')
 
-# Print error summary
-print('\n=== ERROR SUMMARY ===')
-total_errors = 0
-for metric in metrics:
-    for mode in modes:
-        errors = tot_NaN_vals_dict[metric][mode]
-        if errors > 0:
-            print(f'{metric} ({mode}): {errors} NaN values replaced')
-            total_errors += errors
+# # Print error summary
+# print('\n=== ERROR SUMMARY ===')
+# total_errors = 0
+# for metric in metrics:
+#     for mode in modes:
+#         errors = tot_NaN_vals_dict[metric][mode]
+#         if errors > 0:
+#             print(f'{metric} ({mode}): {errors} NaN values replaced')
+#             total_errors += errors
 
-if total_errors == 0:
-    print('No errors encountered during simulation.')
-else:
-    print(f'Total errors handled: {total_errors}')
+# if total_errors == 0:
+#     print('No errors encountered during simulation.')
+# else:
+#     print(f'Total errors handled: {total_errors}')
 
 print(f'\n=== ANALYSIS COMPLETED ===')
 print(f'Total simulation time: {timer.toc():.2f} seconds')
@@ -490,5 +497,3 @@ print(f'Output files generated:')
 print(f'  - Baseline: {file_to_save}_{mode}_0_baseline.xlsx')
 print(f'  - Full results: {file_to_save}_{mode}_1_full_evaluation.xlsx')
 
-if __name__ == '__main__':
-    print("Microalgae uncertainty analysis completed!")

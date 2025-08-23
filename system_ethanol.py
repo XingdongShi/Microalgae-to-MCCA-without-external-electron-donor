@@ -34,16 +34,16 @@ from .units import (
 )
 from .utils import price
 from ._chemicals import chems
-from .tea import create_tea
+from .tea import microalgae_tea
 from .streams import microalgae_feed
 import warnings
 # Filter out specific warnings
-# warnings.filterwarnings("ignore", message="phase equilibrium solution results in negative flow rates")
-# warnings.filterwarnings("ignore", message=".*has no defined Dortmund groups.*")
-# warnings.filterwarnings("ignore", message=".*has been replaced in registry")
-# warnings.filterwarnings("ignore", category=bst.exceptions.CostWarning)
-# warnings.filterwarnings("ignore", message=".*moisture.*is smaller than the desired.*")
-# warnings.filterwarnings("ignore", message=".*moisture of influent.*is smaller than the desired.*")
+warnings.filterwarnings("ignore", message="phase equilibrium solution results in negative flow rates")
+warnings.filterwarnings("ignore", message=".*has no defined Dortmund groups.*")
+warnings.filterwarnings("ignore", message=".*has been replaced in registry")
+warnings.filterwarnings("ignore", category=bst.exceptions.CostWarning)
+warnings.filterwarnings("ignore", message=".*moisture.*is smaller than the desired.*")
+warnings.filterwarnings("ignore", message=".*moisture of influent.*is smaller than the desired.*")
 
 # ------------------------------------------------------------------
 # Utility: labor cost scaling with plant size
@@ -352,20 +352,7 @@ microalgae_mcca_sys_ethanol.simulate()
 # TEA analysis
 # Dry biomass feed rate in ton per day (t/d)
 dry_tpd = u.U101.ins[0].F_mass * 24 / 1000  # kg/h -> t/d
-microalgae_tea_ethanol = create_tea(system=microalgae_mcca_sys_ethanol, IRR=0.10, duration=(2024, 2045),
-    depreciation='MACRS7', income_tax=0.21, 
-        operating_days=330,
-    lang_factor= None, construction_schedule=(0.08, 0.60, 0.32),
-    startup_months=3, startup_FOCfrac=1, startup_salesfrac=0.5,
-    startup_VOCfrac=0.75, WC_over_FCI=0.05,
-    finance_interest=0.08, finance_years=10, finance_fraction=0.4,
-        OSBL_units=(u.CT, u.CWP, u.ADP, u.PWC, u.BT601),
-    warehouse=0.04, site_development=0.09, additional_piping=0.045,
-    proratable_costs=0.10, field_expenses=0.10, construction=0.20,
-    contingency=0.10, other_indirect_costs=0.10, 
-    labor_cost=max(0.5e6, compute_labor_cost(dry_tpd)),
-        labor_burden=0.90, property_insurance=0.007, maintenance=0.03, boiler_turbogenerator=u.BT601,
-    steam_power_depreciation='MACRS20')
+microalgae_tea_ethanol = microalgae_tea(microalgae_mcca_sys_ethanol)
 
 if __name__ == '__main__':
     microalgae_mcca_sys_ethanol.diagram('cluster', format='png')
@@ -398,25 +385,3 @@ if __name__ == '__main__':
     print("FOC Table:\n", microalgae_tea_ethanol.FOC_table())
     print("Cashflow Table:\n", microalgae_tea_ethanol.get_cashflow_table())
     
-    # Quick check: product flows in each units
-    # print("\n===== Stream Mass Flows for Each Unit (kg/hr) =====")
-    # for u_ in microalgae_mcca_sys.units:
-    #     print(f"\n[{u_.ID} - {u_.__class__.__name__}]")
-    #     for i, stream in enumerate(u_.ins):
-    #         if stream:
-    #             print(f"  Inlet {i+1} ({stream.ID}):")
-    #             for chem, flow in zip(stream.chemicals.IDs, stream.mass):
-    #                 if abs(flow) > 1e-6:
-    #                     print(f"    {chem}: {flow:.2f} kg/hr")
-    #     for i, stream in enumerate(u_.outs):
-    #         if stream:
-    #             print(f"  Outlet {i+1} ({stream.ID}):")
-    #             for chem, flow in zip(stream.chemicals.IDs, stream.mass):
-    #                 if abs(flow) > 1e-6:
-    #                     print(f"    {chem}: {flow:.2f} kg/hr")
-
-    # Quick check: product flows and prices
-    # for p in (#s.butanol_product, 
-    #           s.caproic_acid_product,s.heptanoic_acid_product, s.caprylic_acid_product, s.butyric_acid_product):
-    #    print(f"{p.ID}: {p.F_mass:.2f} kg/h @ {p.price} $/kg")
-

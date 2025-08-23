@@ -26,7 +26,11 @@ import numpy as np
 import pandas as pd
 import biosteam as bst
 from .system import create_microalgae_MCCA_production_sys
+from .system_ethanol import create_microalgae_MCCA_production_sys_ethanol
+from .system_no_yeast import create_microalgae_MCCA_production_no_yeast_sys
+from .system_noCyeast import create_microalgae_MCCA_noCyeast_production_sys as create_microalgae_MCCA_production_sys_noCyeast
 from ._chemicals import chems
+from .utils import CFs
 
 __all__ = ['LCA']
 
@@ -337,55 +341,28 @@ class LCA:
         
         return df
 
+    def get_direct_emissions_breakdown(self):
+        return {
+            'direct_emissions_GWP': self.direct_emissions_GWP,
+            'biogenic_emissions_GWP': self.biogenic_emissions_GWP,
+            'EOL_GWP': int(self.add_EOL_GWP) * self.EOL_GWP,
+            'direct_non_biogenic_emissions_GWP': self.direct_non_biogenic_emissions_GWP,
+        }
+
+    def get_direct_emissions_stream_breakdown(self):
+        per_stream = []
+        for s in self.emissions:
+            try:
+                c_flow = s.get_atomic_flow('C')
+            except Exception:
+                c_flow = 0.0
+            contribution = c_flow * self._CO2_MW / self.functional_quantity_per_h
+            per_stream.append((getattr(s, 'ID', ''), contribution))
+        return per_stream
+
 
 def create_microalgae_lca(system, main_product, main_product_chemical_IDs, boiler):
-    CFs = {
-        # =============================================================================
-        # 100-year global warming potential (GWP) in kg CO2-eq/kg
-        # =============================================================================
-        'GWP_100':{
-            'Electricity': 0.36, # [kg*CO2*eq / kWhr] From GREET; NG-Fired Simple-Cycle Gas Turbine CHP Plant
-            # 0.66 is the GWP from producing diesel from GREET; Conventional diesel from crude oil for US Refineries.
-            # Downstream fuel emissions are added in. Accounts for how biodiesel has less energy than diesel.
-            'CH4': 0.33,  # Natural gas from shell conventional recovery, GREET; includes non-biogenic emissions
-            'H2SO4': 0.04447,  # kg CO2e/kg
-            'NaOH': 2.01,  # GREET
-            'NH4OH': 1.28304, # multiplied by chemicals.NH3.MW/chemicals.NH4OH.MW,   
-            'CalciumDihydroxide': 1.29,  # GREET
-            'Ethanol': 1.44, # from BDO project
-            
-            'GlucoAmylase': 6.16,  # from Succinic project
-            'AlphaAmylase': 6.16,  # from Succinic project
-            
-            'OleylAlcohol': 1.9,  # kg CO2e/kg
-            'Lime': 1.29 * 56.0774/74.093, # CaO to Ca(OH)2
-            'Microalgae': 0.1,  # 
-            'CO2': 0.87104, # ecoinvent 3.8 carbon dioxide production, liquid, RoW
-            'CH4': 0.40, # NA NG from shale and conventional recovery
-            'Electricity': 0.4490 # kg CO2-eq/kWh GREET 2022 US Mix  # assume production==consumption, both in kg CO2-eq/kWh
-        },
-
-        # =============================================================================
-        # Fossil energy consumption (FEC), in MJ/kg of material
-        # =============================================================================
-        'FEC': {
-            'Electricity': 10.0,  # MJ/kWh
-            'H2SO4': 568.98/1e3,
-            'NaOH': 29,  # MJ/kg
-            'NH4OH': 42 * 0.4860, # multiplied by chemicals.NH3.MW/chemicals.NH4OH.MW,
-            'CalciumDihydroxide': 4.0,  # MJ/kg
-            'CH4': 55.0,  # MJ/kg
-            'Ethanol': 16,
-            'OleylAlcohol': 45.0,  # MJ/kg
-            'GlucoAmylase': 90.0,  # MJ/kg
-            'AlphaAmylase': 90.0,  # MJ/kg
-            'Lime': 4.896 * 56.0774/74.093, # CaO to Ca(OH)2
-            'Microalgae': 2.0,  # MJ/kg
-            'Electricity': 5.724, # MJ/kWh # GREET 2022 US Mix #assume production==consumption, both in MJ/kWh
-            'CH4': 50, # NA NG from shale and conventional recovery
-        }
-    }
-    
+        
     cooling_tower = next((unit for unit in system.units 
                          if unit.__class__.__name__ == 'CoolingTower'), None)
     chilled_water_processing_units = [unit for unit in system.units 
@@ -421,6 +398,30 @@ def create_microalgae_lca(system, main_product, main_product_chemical_IDs, boile
     
     return microalgae_lca
 
+def create_ethanol_system_lca():
+    system = create_microalgae_MCCA_production_sys_ethanol()
+    system.simulate()
+    main_product = system.flowsheet.stream.caproic_acid_product
+    main_product_chemical_IDs = ['CaproicAcid']
+    boiler = system.flowsheet.unit.BT601
+    return create_microalgae_lca(system, main_product, main_product_chemical_IDs, boiler)
+
+def create_no_yeast_system_lca():
+    system = create_microalgae_MCCA_production_no_yeast_sys()
+    system.simulate()
+    main_product = system.flowsheet.stream.caproic_acid_product
+    main_product_chemical_IDs = ['CaproicAcid']
+    boiler = system.flowsheet.unit.BT601
+    return create_microalgae_lca(system, main_product, main_product_chemical_IDs, boiler)
+
+def create_noCyeast_system_lca():
+    system = create_microalgae_MCCA_production_sys_noCyeast()
+    system.simulate()
+    main_product = system.flowsheet.stream.caproic_acid_product
+    main_product_chemical_IDs = ['CaproicAcid']
+    boiler = system.flowsheet.unit.BT601
+    return create_microalgae_lca(system, main_product, main_product_chemical_IDs, boiler)
+
 if __name__ == "__main__":
     bst.settings.set_thermo(chems)
     microalgae_sys = create_microalgae_MCCA_production_sys()
@@ -434,11 +435,53 @@ if __name__ == "__main__":
         main_product_chemical_IDs=main_product_chemical_IDs,
         boiler=boiler
     )
-    
-    # Call detailed breakdown method
-    breakdown_data = lca.print_GWP_breakdown(sort_by_magnitude=True, show_small_contributions=False)  
-    # Save DataFrame to CSV file (optional)
-    # breakdown_df.to_csv('microalgae_gwp_breakdown.csv', index=False, encoding='utf-8-sig')
+
+    breakdown_data = lca.print_GWP_breakdown(sort_by_magnitude=True, show_small_contributions=False)
+    print("\n--- Baseline direct non-biogenic emissions composition ---")
+    parts = lca.get_direct_emissions_breakdown()
+    for k, v in parts.items():
+        print(f"{k}: {v:.4f} kg CO2e/1 kg")
+    print("Stream-level direct emissions contributions (kg CO2e per 1 kg FU):")
+    for sid, val in lca.get_direct_emissions_stream_breakdown():
+        if abs(val) > 1e-6:
+            print(f"  {sid}: {val:.4f}")
+
+    ethanol_lca = create_ethanol_system_lca()
+    no_yeast_lca = create_no_yeast_system_lca()
+    noCyeast_lca = create_noCyeast_system_lca()
+
+    print("\n===== Ethanol system LCA breakdown =====")
+    ethanol_lca.print_GWP_breakdown(sort_by_magnitude=True, show_small_contributions=False)
+    print("\n--- Ethanol direct non-biogenic emissions composition ---")
+    parts = ethanol_lca.get_direct_emissions_breakdown()
+    for k, v in parts.items():
+        print(f"{k}: {v:.4f} kg CO2e/1 kg")
+    print("Stream-level direct emissions contributions (kg CO2e per 1 kg FU):")
+    for sid, val in ethanol_lca.get_direct_emissions_stream_breakdown():
+        if abs(val) > 1e-6:
+            print(f"  {sid}: {val:.4f}")
+
+    print("\n===== No-Yeast system LCA breakdown =====")
+    no_yeast_lca.print_GWP_breakdown(sort_by_magnitude=True, show_small_contributions=False)
+    print("\n--- No-Yeast direct non-biogenic emissions composition ---")
+    parts = no_yeast_lca.get_direct_emissions_breakdown()
+    for k, v in parts.items():
+        print(f"{k}: {v:.4f} kg CO2e/1 kg")
+    print("Stream-level direct emissions contributions (kg CO2e per 1 kg FU):")
+    for sid, val in no_yeast_lca.get_direct_emissions_stream_breakdown():
+        if abs(val) > 1e-6:
+            print(f"  {sid}: {val:.4f}")
+
+    print("\n===== NoCyeast system LCA breakdown =====")
+    noCyeast_lca.print_GWP_breakdown(sort_by_magnitude=True, show_small_contributions=False)
+    print("\n--- NoCyeast direct non-biogenic emissions composition ---")
+    parts = noCyeast_lca.get_direct_emissions_breakdown()
+    for k, v in parts.items():
+        print(f"{k}: {v:.4f} kg CO2e/1 kg")
+    print("Stream-level direct emissions contributions (kg CO2e per 1 kg FU):")
+    for sid, val in noCyeast_lca.get_direct_emissions_stream_breakdown():
+        if abs(val) > 1e-6:
+            print(f"  {sid}: {val:.4f}")
 
 
 

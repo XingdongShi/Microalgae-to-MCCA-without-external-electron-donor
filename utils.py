@@ -116,5 +116,41 @@ _cooling.T_limit = _cooling.T + 9
 for i in (_lps, _mps, _hps, _cooling, _chilled):
     i.heat_transfer_price = i.regeneration_price = 0
  
+# Default characterization factors for LCA (GWP_100 and FEC)
+CFs = {
+    'GWP_100': {
+        # Electricity mix (kg CO2-eq/kWh)
+        'Electricity': 0.4490,
+        # Materials (kg CO2-eq/kg)
+        'H2SO4': 0.04447,
+        'NaOH': 2.01,
+        'NH4OH': 1.28304,
+        'CalciumDihydroxide': 1.29,
+        'Ethanol': 1.44,
+        'GlucoAmylase': 6.16,
+        'AlphaAmylase': 6.16,
+        'OleylAlcohol': 1.9,
+        'Lime': 1.29 * 56.0774/74.093,  # CaO to Ca(OH)2
+        'Microalgae': 0.1,
+        'CO2': 0.87104,
+        'CH4': 0.40,
+    },
+    'FEC': {
+        # Electricity mix (MJ/kWh)
+        'Electricity': 5.724,
+        # Materials (MJ/kg)
+        'H2SO4': 568.98/1e3,
+        'NaOH': 29,
+        'NH4OH': 42 * 0.4860,
+        'CalciumDihydroxide': 4.0,
+        'CH4': 50,
+        'Ethanol': 16,
+        'OleylAlcohol': 45.0,
+        'GlucoAmylase': 90.0,
+        'AlphaAmylase': 90.0,
+        'Lime': 4.896 * 56.0774/74.093,  # CaO to Ca(OH)2
+        'Microalgae': 2.0,
+    },
+}
 
 
