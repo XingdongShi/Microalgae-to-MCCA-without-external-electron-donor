@@ -207,6 +207,17 @@ def create_tea_breakdown_dataframe(system, tea, unit_groups, fraction=True,
     return df
 
 
+def get_unit_groups_for_system(system):
+    try:
+        return bst.UnitGroup.group_by_area(system)
+    except Exception:
+        try:
+            from .model_utils import get_unit_groups  # type: ignore
+            return get_unit_groups()
+        except Exception:
+            return []
+
+
 def get_cost_breakdown_by_category(tea):
     breakdown = {}
     breakdown['Installed equipment cost'] = tea.installed_equipment_cost / 1e6
