@@ -114,8 +114,10 @@ def create_microalgae_MCCA_noCyeast_production_sys(ins, outs):
     nh4oh_mass = nh4oh_mol * 35 / 1000 # mol mass to mass
     ammonium_hydroxide = Stream('ammonium_hydroxide', NH4OH=nh4oh_mass, units='kg/hr', price=price['AmmoniumHydroxide'])
     # Enzyme dosages
-    glucoamylase_mass = float(microalgae_mass * 0.0011)  # ref from cron project
-    alpha_amylase_mass = float(microalgae_mass * 0.0082)  # ref from cron project
+    gluco_coeff = 0.0011
+    alpha_coeff = 0.0082
+    glucoamylase_mass = float(microalgae_mass * gluco_coeff)
+    alpha_amylase_mass = float(microalgae_mass * alpha_coeff)
     glucoamylase = Stream('glucoamylase', GlucoAmylase=glucoamylase_mass, units='kg/hr', price=price['GlucoAmylase'])
     alpha_amylase = Stream('alpha_amylase', AlphaAmylase=alpha_amylase_mass, units='kg/hr', price=price['AlphaAmylase'])
     
@@ -264,35 +266,34 @@ def create_microalgae_MCCA_noCyeast_production_sys(ins, outs):
     # Bind as method for parameter loading
     D403.set_distillation_efficiency = lambda x: [setattr(unit, 'Lr', 0.99 * x) or setattr(unit, 'Hr', 0.99 * x) for unit in distillation_units]
     
-    #Add acid loading factor specification to a suitable unit
-    @R201.add_specification(run=True)  # Add to acid pretreatment reactor
-    def set_acid_loading_factor(factor=1.0):
-        pure_H2SO4_new = microalgae_mass * acid_loading * factor
-        acid_solution_mass_new = pure_H2SO4_new / acid_purity
+    # Set sulfuric acid by loading x (g H2SO4 / g microalgae): function(x)
+    @R201.add_specification(run=True)
+    def set_acid_loading(x=acid_loading):
+        nonlocal acid_loading
+        acid_loading = float(x)
+        pure_h2so4 = microalgae_mass * acid_loading
+        acid_solution_mass_new = pure_h2so4 / acid_purity
         water_mass_acid_new = acid_solution_mass_new * (1 - acid_purity)
-        _sulfuric_acid_stream.imass['H2SO4'] = pure_H2SO4_new
+        _sulfuric_acid_stream.imass['H2SO4'] = pure_h2so4
         _sulfuric_acid_stream.imass['Water'] = water_mass_acid_new
+    R201.set_acid_loading = lambda x: (
+        _sulfuric_acid_stream.imass.__setitem__('H2SO4', microalgae_mass*float(x)) or
+        _sulfuric_acid_stream.imass.__setitem__('Water', (microalgae_mass*float(x))/acid_purity*(1-acid_purity))
+    )
     
-    # Bind as method for parameter loading
-    def _set_acid_loading_factor(factor):
-        pure_H2SO4_new = microalgae_mass * acid_loading * factor
-        acid_solution_mass_new = pure_H2SO4_new / acid_purity
-        water_mass_acid_new = acid_solution_mass_new * (1 - acid_purity)
-        _sulfuric_acid_stream.imass['H2SO4'] = pure_H2SO4_new
-        _sulfuric_acid_stream.imass['Water'] = water_mass_acid_new
-    R201.set_acid_loading_factor = _set_acid_loading_factor
-    
-    # Add enzyme loading factor specification to a suitable unit
-    @R203.add_specification(run=True)  # Add to first saccharification reactor
-    def set_enzyme_loading_factor(factor=1.0):
-        _glucoamylase_stream.imass['GlucoAmylase'] = microalgae_mass * 0.0011 * factor
-        _alpha_amylase_stream.imass['AlphaAmylase'] = microalgae_mass * 0.0082 * factor
-    
-    # Bind as method for parameter loading
-    def _set_enzyme_loading_factor(factor):
-        _glucoamylase_stream.imass['GlucoAmylase'] = microalgae_mass * 0.0011 * factor
-        _alpha_amylase_stream.imass['AlphaAmylase'] = microalgae_mass * 0.0082 * factor
-    R203.set_enzyme_loading_factor = _set_enzyme_loading_factor
+    # Enzyme loading functions: function(x) directly sets coefficients (kg/kg)
+    @R203.add_specification(run=True)
+    def set_glucoamylase_loading(x=gluco_coeff):
+        nonlocal gluco_coeff
+        gluco_coeff = float(x)
+        _glucoamylase_stream.imass['GlucoAmylase'] = microalgae_mass * gluco_coeff
+    @R204.add_specification(run=True)
+    def set_alpha_amylase_loading(x=alpha_coeff):
+        nonlocal alpha_coeff
+        alpha_coeff = float(x)
+        _alpha_amylase_stream.imass['AlphaAmylase'] = microalgae_mass * alpha_coeff
+    R203.set_glucoamylase_loading = lambda x: _glucoamylase_stream.imass.__setitem__('GlucoAmylase', microalgae_mass * float(x))
+    R204.set_alpha_amylase_loading = lambda x: _alpha_amylase_stream.imass.__setitem__('AlphaAmylase', microalgae_mass * float(x))
 
     # =====================
     # Area 5: Waste reuse for biogas production

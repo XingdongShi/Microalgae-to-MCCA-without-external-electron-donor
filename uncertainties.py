@@ -334,7 +334,7 @@ scenario_name_labels = [_pretty_label(m) for m in modes] if modes else ['Baselin
 def _small_range(val, offset):
     return (val - offset, val + offset)
 
-DO_PLOTS = False  # Set to True to enable plotting
+DO_PLOTS = True  # Set to True to enable plotting
 if DO_PLOTS and len(modes) > 0:
     # Tune fonts to reduce label overlap
     plt.rcParams['font.sans-serif'] = 'Arial'

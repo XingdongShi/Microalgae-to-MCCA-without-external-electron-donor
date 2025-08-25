@@ -76,6 +76,15 @@ splits = [
 
 tmo.settings.set_thermo(chems)
 
+# Compute caproic acid titer (g/L) from an effluent stream, consistent with
+# succinic project's approach of post-calculation based on effluent composition
+def compute_caproic_acid_titer(effluent):
+    try:
+        vol = effluent.F_vol
+        return (effluent.imass['CaproicAcid'] / vol) if vol else 0.0
+    except Exception:
+        return 0.0
+
 # %% 
 # =========================
 # Microalgae Crushing 
@@ -358,7 +367,6 @@ class MCCAFermentation(StirredTankReactor):
         # Store optional explicit biomass flow for yield calculations
         self.microalgae_mass_flow = microalgae_mass_flow
         self.titer = titer
-        
         ID = self.ID
         self._mixed_feed = Stream(f'{ID}_mixed_feed')
         self._tot_feed = Stream(f'{ID}_tot_feed')
@@ -422,20 +430,6 @@ class MCCAFermentation(StirredTankReactor):
         # Determine basis biomass mass (kg/hr)
         microalgae_mass = self.microalgae_mass_flow
         caproic_acid_yield_factor = getattr(self, 'caproic_acid_yield_factor', 1.0)
-        titer = getattr(self, 'titer', 2.003)  # g/L
-        
-        base_titer = 2.003  
-        inhibition_titer = 10.0  
-        
-        if titer > base_titer:
-            if titer <= inhibition_titer:
-                inhibition_factor = 1.0 - 0.05 * (titer - base_titer) / (inhibition_titer - base_titer)
-            else:
-                inhibition_factor = 0.95 * np.exp(-0.1 * (titer - inhibition_titer))
-        else:
-            inhibition_factor = 1.0 + 0.01 * (base_titer - titer)
-     
-        effective_yield_factor = caproic_acid_yield_factor * inhibition_factor
         
         base_yields = {
             'Ethanol': 0.01,
@@ -452,13 +446,15 @@ class MCCAFermentation(StirredTankReactor):
         total_base_yield = sum(base_yields.values())
         base_caproic_yield = base_yields['CaproicAcid']
         
-        new_caproic_yield = base_caproic_yield * effective_yield_factor
+        abs_C6 = getattr(self, 'caproic_acid_yield_absolute', None)
+        if abs_C6 is not None:
+            new_caproic_yield = float(abs_C6)
+        else:
+            new_caproic_yield = base_caproic_yield * caproic_acid_yield_factor
         delta_caproic = new_caproic_yield - base_caproic_yield
         total_other_base_yield = total_base_yield - base_caproic_yield
         
         target_caproic_mass = microalgae_mass * new_caproic_yield  
-        target_volume_L = target_caproic_mass * 1000 / titer  
-                
         if abs(delta_caproic) > 1e-6 and total_other_base_yield > 1e-6:
             adjustment_factor = max(0.1, (total_other_base_yield - delta_caproic) / total_other_base_yield)
             for compound, base_yield in base_yields.items():
@@ -472,13 +468,6 @@ class MCCAFermentation(StirredTankReactor):
                     broth.imass[compound] = target_caproic_mass
                 else:
                     broth.imass[compound] = microalgae_mass * base_yield
-                    
-        current_volume = broth.F_vol  # L
-        if current_volume > 0 and titer >= 5.0: 
-            water_adjustment = max(0, target_volume_L - current_volume)  
-            max_water = microalgae_mass * 10  
-            water_adjustment = min(water_adjustment, max_water)
-            broth.imass['Water'] += water_adjustment  
         gas.copy_like(n2)
         gas.imass['H2'] = microalgae_mass * 0.1
         
@@ -496,7 +485,7 @@ class MCCAFermentation(StirredTankReactor):
             yeast_recycle.empty()
         
         fermentation_waste.empty()
-
+        self.effluent_titer = compute_caproic_acid_titer(broth)
     def _design(self):
         Design = self.design_results
         Design['Fermenter size'] = self.outs[0].F_mass * self.tau
@@ -504,6 +493,16 @@ class MCCAFermentation(StirredTankReactor):
         duty = 50 * self.F_mass_in  # Heat duty
         self.add_heat_utility(duty, self.T)
 
+    # Convenience setters for external analyses/Excel loaders
+    def set_C6_titer(self, value: float):
+        self.titer = float(value)
+
+    def set_C6_yield_factor(self, value: float):
+        self.caproic_acid_yield_factor = float(value)
+
+    def set_C6_yield(self, value: float):
+        # Absolute C6 yield (fraction of algae mass to CaproicAcid)
+        self.caproic_acid_yield_absolute = float(value)
 
 @cost(basis='Fermenter size', ID='Fermenter', units='kg',
       kW=100, cost=5128000, S=(42607+443391+948+116)*(60+36),
@@ -641,20 +640,6 @@ class MCCAFermentation_no_yeast(StirredTankReactor):
         # Determine basis biomass mass (kg/hr)
         microalgae_mass = self.microalgae_mass_flow
         caproic_acid_yield_factor = getattr(self, 'caproic_acid_yield_factor', 1.0)
-        titer = getattr(self, 'titer', 1.208)  # g/L
-        
-        base_titer = 1.208  
-        inhibition_titer = 10.0  
-        
-        if titer > base_titer:
-            if titer <= inhibition_titer:
-                inhibition_factor = 1.0 - 0.05 * (titer - base_titer) / (inhibition_titer - base_titer)
-            else:
-                inhibition_factor = 0.95 * np.exp(-0.1 * (titer - inhibition_titer))
-        else:
-            inhibition_factor = 1.0 + 0.01 * (base_titer - titer)
-     
-        effective_yield_factor = caproic_acid_yield_factor * inhibition_factor
         
         base_yields = {
             'Ethanol': 0.01,
@@ -671,12 +656,15 @@ class MCCAFermentation_no_yeast(StirredTankReactor):
         total_base_yield = sum(base_yields.values())
         base_caproic_yield = base_yields['CaproicAcid']
         
-        new_caproic_yield = base_caproic_yield * effective_yield_factor
+        abs_C6 = getattr(self, 'caproic_acid_yield_absolute', None)
+        if abs_C6 is not None:
+            new_caproic_yield = float(abs_C6)
+        else:
+            new_caproic_yield = base_caproic_yield * caproic_acid_yield_factor
         delta_caproic = new_caproic_yield - base_caproic_yield
         total_other_base_yield = total_base_yield - base_caproic_yield
         
         target_caproic_mass = microalgae_mass * new_caproic_yield  
-        target_volume_L = target_caproic_mass * 1000 / titer  
                 
         if abs(delta_caproic) > 1e-6 and total_other_base_yield > 1e-6:
             adjustment_factor = max(0.1, (total_other_base_yield - delta_caproic) / total_other_base_yield)
@@ -691,22 +679,24 @@ class MCCAFermentation_no_yeast(StirredTankReactor):
                     broth.imass[compound] = target_caproic_mass
                 else:
                     broth.imass[compound] = microalgae_mass * base_yield
-                    
-        current_volume = broth.F_vol  
-        if current_volume > 0 and titer >= 5.0: 
-            water_adjustment = max(0, target_volume_L - current_volume)  
-            max_water = microalgae_mass * 10  
-            water_adjustment = min(water_adjustment, max_water)
-            broth.imass['Water'] += water_adjustment  
+
         gas.copy_like(n2)
         gas.imass['H2'] = microalgae_mass * 0.1
 
+        self.effluent_titer = compute_caproic_acid_titer(broth)
     def _design(self):
         Design = self.design_results
         Design['Fermenter size'] = self.outs[0].F_mass * self.tau
         Design['Broth flow rate'] = self.outs[0].F_mass
         duty = 50 * self.F_mass_in  # Heat duty
         self.add_heat_utility(duty, self.T)
+
+    # Convenience setters to align with yeast case
+    def set_C6_yield_factor(self, value: float):
+        self.caproic_acid_yield_factor = float(value)
+
+    def set_C6_yield(self, value: float):
+        self.caproic_acid_yield_absolute = float(value)
 
 # %% 
 # =========================
